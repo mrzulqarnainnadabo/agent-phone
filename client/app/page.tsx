@@ -51,7 +51,6 @@ export default function Home() {
   const [showCreate, setShowCreate] = useState(false);
   const [loading, setLoading] = useState(false);
 
-  // Chat state (Home)
   const [messages, setMessages] = useState(
     [{ id: "welcome", role: "assistant" as const, content: "Welcome to Agent Phone.\n\nYour control room for trusted AI workers." }]
   );
@@ -126,7 +125,6 @@ export default function Home() {
     }
   }
 
-  // ── Create Agent Wizard ──────────────────────────────
   if (showCreate) {
     return (
       <CreateAgentWizard
@@ -142,7 +140,6 @@ export default function Home() {
 
   return (
     <div className="flex flex-col h-dvh max-w-lg mx-auto bg-gray-950 text-gray-100">
-      {/* Content */}
       <main className="flex-1 overflow-y-auto">
         {tab === "home" && (
           <div className="flex flex-col h-full">
@@ -252,7 +249,6 @@ export default function Home() {
         )}
       </main>
 
-      {/* Bottom Nav */}
       <nav className="border-t border-gray-800 bg-gray-950 px-2 py-2 flex justify-around">
         {([
           { id: "home", label: "Home" },
@@ -286,7 +282,6 @@ export default function Home() {
   );
 }
 
-// ── 5-Step Create Agent Wizard ─────────────────────────
 function CreateAgentWizard({ onClose, onCreated }: { onClose: () => void; onCreated: () => void }) {
   const [step, setStep] = useState(1);
   const [name, setName] = useState("");
@@ -306,11 +301,12 @@ function CreateAgentWizard({ onClose, onCreated }: { onClose: () => void; onCrea
     setSaving(true);
     setError("");
     try {
+      const cleanHandle = handle.replace(/^@/, "").toLowerCase();
       const agent = await api("/api/v1/agents", {
         method: "POST",
         body: JSON.stringify({
           name,
-          handle: handle.lstrip ? handle : handle.replace(/^@/, ""),
+          handle: cleanHandle,
           purpose,
           personality,
           approval_mode: approvalMode,
@@ -436,7 +432,7 @@ function CreateAgentWizard({ onClose, onCreated }: { onClose: () => void; onCrea
               <div className="text-xs text-gray-500 pt-2">
                 {permissions.map((p) => `${p.capability}: ${p.level}`).join(" · ")}
               </div>
-              <div className="text-xs text-gray-500">Approval: {approvalMode.replace("_", " ")}</div>
+              <div className="text-xs text-gray-500">Approval: {approvalMode.replace(/_/g, " ")}</div>
             </div>
             {error && <p className="text-red-400 text-sm">{error}</p>}
           </>
@@ -459,11 +455,4 @@ function CreateAgentWizard({ onClose, onCreated }: { onClose: () => void; onCrea
       </div>
     </div>
   );
-}
-
-// tiny helper
-declare global {
-  interface String {
-    lstrip?: any;
-  }
 }
