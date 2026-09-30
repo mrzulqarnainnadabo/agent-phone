@@ -1,0 +1,32 @@
+services:
+  api:
+    build:
+      context: ./server
+      dockerfile: Dockerfile
+    ports:
+      - "8000:8000"
+    environment:
+      - MODEL_API_KEY=${MODEL_API_KEY:-}
+      - MODEL_API_BASE_URL=${MODEL_API_BASE_URL:-https://api.openai.com/v1}
+      - APP_AUTH_TOKEN=${APP_AUTH_TOKEN:-dev-token-change-me}
+      - DATA_DIR=/data
+      - HOST=0.0.0.0
+      - PORT=8000
+    volumes:
+      - agent_phone_data:/data
+    restart: unless-stopped
+
+  web:
+    build:
+      context: ./client
+      dockerfile: Dockerfile
+    ports:
+      - "3000:3000"
+    environment:
+      - NEXT_PUBLIC_API_URL=http://localhost:8000
+    depends_on:
+      - api
+    restart: unless-stopped
+
+volumes:
+  agent_phone_data:
