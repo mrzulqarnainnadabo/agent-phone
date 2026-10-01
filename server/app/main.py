@@ -39,6 +39,7 @@ async def log_event(db, goal_id, event_type, actor_type="system", actor_id=None,
 
 async def init_db():
     async with aiosqlite.connect(DB_PATH) as db:
+        db.row_factory = aiosqlite.Row
         await db.executescript("""
             CREATE TABLE IF NOT EXISTS threads (id TEXT PRIMARY KEY, title TEXT, system_prompt TEXT, created_at TEXT, updated_at TEXT);
             CREATE TABLE IF NOT EXISTS messages (id TEXT PRIMARY KEY, thread_id TEXT, role TEXT, content TEXT, created_at TEXT, FOREIGN KEY (thread_id) REFERENCES threads(id));
