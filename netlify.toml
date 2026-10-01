@@ -1,0 +1,13 @@
+[build]
+  base = "client"
+  command = "npm install && npm run build"
+  publish = ".next"
+
+# Next.js on Netlify — use @netlify/plugin-nextjs if available
+# Fallback: static export not used; prefer Netlify Next runtime
+
+[[plugins]]
+  package = "@netlify/plugin-nextjs"
+
+[build.environment]
+  NODE_VERSION = "20"
