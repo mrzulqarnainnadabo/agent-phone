@@ -7,7 +7,6 @@ from datetime import datetime
 from pathlib import Path
 
 app = FastAPI(title="Agent Phone API", description="Phone-first control room for trusted AI workers", version="0.7.0")
-# Browsers reject allow_origins=["*"] combined with allow_credentials=True.
 _cors_origins = [o.strip() for o in os.getenv(
     "CORS_ORIGINS",
     "https://agent-phone.netlify.app,http://localhost:3000,http://127.0.0.1:3000"
@@ -134,3 +133,388 @@ async def ready():
         db = await get_db(); await db.execute("SELECT 1"); await db.close()
         return {"ok": True, "db": True}
     except Exception as e: raise HTTPException(503, str(e))
+
+@app.post("/api/v1/agents")
+async def create_agent(body: AgentCreate, _auth=Depends(require_auth)):
+    aid = f"agent-{uuid.uuid4().hex[:8]}"; handle = body.handle.lstrip("@").lower(); now = now_iso()
+    db = await get_db()
+    try:
+        if await (await db.execute("SELECT id FROM agents WHERE handle=?", (handle,))).fetchone():
+            raise HTTPException(409, "Handle already taken")
+        await db.execute("INSERT INTO agents (id,name,handle,purpose,personality,system_instructions,status,approval_mode,created_at,updated_at) VALUES (?,?,?,?,?,?,?,?,?,?)",
+            (aid, body.name, handle, body.purpose, body.personality, body.system_instructions, "active", body.approval_mode, now, now))
+        await db.execute("INSERT INTO approval_policies (id,agent_id,default_action,consequential_action,external_communication,destructive_action,financial_action) VALUES (?,?,?,?,?,?,?)",
+            (f"pol-{uuid.uuid4().hex[:8]}", aid, "allow", "ask", "ask", "deny", "deny"))
+        await db.commit()
+        return {"id": aid, "name": body.name, "handle": handle, "status": "active"}
+    finally: await db.close()
+
+@app.get("/api/v1/agents")
+async def list_agents(_auth=Depends(require_auth)):
+    db = await get_db()
+    try:
+        cur = await db.execute("SELECT id,name,handle,purpose,personality,status,approval_mode,created_at,updated_at FROM agents WHERE status!='archived' ORDER BY updated_at DESC")
+        return [dict(r) for r in await cur.fetchall()]
+    finally: await db.close()
+
+@app.get("/api/v1/agents/{agent_id}")
+async def get_agent(agent_id: str, _auth=Depends(require_auth)):
+    db = await get_db()
+    try:
+        cur = await db.execute("SELECT * FROM agents WHERE id=?", (agent_id,)); row = await cur.fetchone()
+        if not row: raise HTTPException(404, "Agent not found")
+        agent = dict(row)
+        cur = await db.execute("SELECT capability,level FROM agent_permissions WHERE agent_id=?", (agent_id,))
+        agent["permissions"] = [dict(r) for r in await cur.fetchall()]
+        cur = await db.execute("SELECT * FROM approval_policies WHERE agent_id=?", (agent_id,)); pol = await cur.fetchone()
+        agent["approval_policy"] = dict(pol) if pol else None
+        return agent
+    finally: await db.close()
+
+@app.patch("/api/v1/agents/{agent_id}")
+async def update_agent(agent_id: str, body: AgentUpdate, _auth=Depends(require_auth)):
+    db = await get_db()
+    try:
+        if not await (await db.execute("SELECT id FROM agents WHERE id=?", (agent_id,))).fetchone(): raise HTTPException(404, "Agent not found")
+        updates, values = [], []
+        for f in ["name","purpose","personality","system_instructions","approval_mode","status"]:
+            v = getattr(body, f)
+            if v is not None: updates.append(f"{f}=?"); values.append(v)
+        if updates:
+            updates.append("updated_at=?"); values.append(now_iso()); values.append(agent_id)
+            await db.execute(f"UPDATE agents SET {', '.join(updates)} WHERE id=?", values); await db.commit()
+        return {"ok": True}
+    finally: await db.close()
+
+@app.delete("/api/v1/agents/{agent_id}")
+async def archive_agent(agent_id: str, _auth=Depends(require_auth)):
+    db = await get_db()
+    try:
+        await db.execute("UPDATE agents SET status='archived', updated_at=? WHERE id=?", (now_iso(), agent_id)); await db.commit()
+        return {"ok": True, "status": "archived"}
+    finally: await db.close()
+
+@app.get("/api/v1/agents/{agent_id}/permissions")
+async def get_permissions(agent_id: str, _auth=Depends(require_auth)):
+    db = await get_db()
+    try:
+        cur = await db.execute("SELECT capability,level FROM agent_permissions WHERE agent_id=?", (agent_id,))
+        return [dict(r) for r in await cur.fetchall()]
+    finally: await db.close()
+
+@app.put("/api/v1/agents/{agent_id}/permissions")
+async def set_permissions(agent_id: str, body: PermissionsUpdate, _auth=Depends(require_auth)):
+    db = await get_db()
+    try:
+        await db.execute("DELETE FROM agent_permissions WHERE agent_id=?", (agent_id,))
+        for p in body.permissions:
+            await db.execute("INSERT INTO agent_permissions (id,agent_id,capability,level) VALUES (?,?,?,?)", (f"perm-{uuid.uuid4().hex[:8]}", agent_id, p.capability, p.level))
+        await db.commit(); return {"ok": True, "count": len(body.permissions)}
+    finally: await db.close()
+
+@app.get("/api/v1/agents/{agent_id}/approval-policy")
+async def get_approval_policy(agent_id: str, _auth=Depends(require_auth)):
+    db = await get_db()
+    try:
+        cur = await db.execute("SELECT * FROM approval_policies WHERE agent_id=?", (agent_id,)); row = await cur.fetchone()
+        if not row: raise HTTPException(404, "Policy not found")
+        return dict(row)
+    finally: await db.close()
+
+@app.put("/api/v1/agents/{agent_id}/approval-policy")
+async def set_approval_policy(agent_id: str, body: ApprovalPolicyUpdate, _auth=Depends(require_auth)):
+    db = await get_db()
+    try:
+        now = now_iso()
+        if await (await db.execute("SELECT id FROM approval_policies WHERE agent_id=?", (agent_id,))).fetchone():
+            await db.execute("UPDATE approval_policies SET default_action=?,consequential_action=?,external_communication=?,destructive_action=?,financial_action=?,updated_at=? WHERE agent_id=?",
+                (body.default_action, body.consequential_action, body.external_communication, body.destructive_action, body.financial_action, now, agent_id))
+        else:
+            await db.execute("INSERT INTO approval_policies (id,agent_id,default_action,consequential_action,external_communication,destructive_action,financial_action) VALUES (?,?,?,?,?,?,?)",
+                (f"pol-{uuid.uuid4().hex[:8]}", agent_id, body.default_action, body.consequential_action, body.external_communication, body.destructive_action, body.financial_action))
+        await db.commit(); return {"ok": True}
+    finally: await db.close()
+
+@app.get("/api/v1/approvals/count")
+async def approvals_count(_auth=Depends(require_auth)):
+    db = await get_db()
+    try:
+        cur = await db.execute("SELECT COUNT(*) as c FROM approvals WHERE status='pending'")
+        return {"pending": (await cur.fetchone())["c"]}
+    finally: await db.close()
+
+@app.get("/api/v1/approvals")
+async def list_approvals(status: str=Query("pending"), agent_id: Optional[str]=None, limit: int=Query(25, le=100), _auth=Depends(require_auth)):
+    db = await get_db()
+    try:
+        if agent_id:
+            cur = await db.execute("SELECT * FROM approvals WHERE status=? AND agent_id=? ORDER BY created_at DESC LIMIT ?", (status, agent_id, limit))
+        else:
+            cur = await db.execute("SELECT * FROM approvals WHERE status=? ORDER BY created_at DESC LIMIT ?", (status, limit))
+        return [dict(r) for r in await cur.fetchall()]
+    finally: await db.close()
+
+@app.get("/api/v1/approvals/{approval_id}")
+async def get_approval(approval_id: str, _auth=Depends(require_auth)):
+    db = await get_db()
+    try:
+        cur = await db.execute("SELECT * FROM approvals WHERE id=?", (approval_id,)); row = await cur.fetchone()
+        if not row: raise HTTPException(404, "Approval not found")
+        return dict(row)
+    finally: await db.close()
+
+@app.post("/api/v1/approvals")
+async def create_approval(body: ApprovalCreate, _auth=Depends(require_auth)):
+    db = await get_db()
+    try:
+        if not await (await db.execute("SELECT id FROM agents WHERE id=? AND status!='archived'", (body.agent_id,))).fetchone():
+            raise HTTPException(404, "Agent not found")
+        aid = f"apr-{uuid.uuid4().hex[:10]}"
+        await db.execute("INSERT INTO approvals (id,agent_id,goal_id,action_type,action_level,title,description,proposed_input,proposed_output,reason,status,created_at) VALUES (?,?,?,?,?,?,?,?,?,?,'pending',?)",
+            (aid, body.agent_id, body.goal_id, body.action_type, body.action_level, body.title, body.description, body.proposed_input, body.proposed_output, body.reason, now_iso()))
+        if body.goal_id:
+            await log_event(db, body.goal_id, "approval.created", actor_type="agent", actor_id=body.agent_id, payload={"approval_id": aid, "title": body.title})
+        await db.commit()
+        cur = await db.execute("SELECT * FROM approvals WHERE id=?", (aid,)); return dict(await cur.fetchone())
+    finally: await db.close()
+
+@app.post("/api/v1/approvals/demo")
+async def create_demo_approval(_auth=Depends(require_auth)):
+    db = await get_db()
+    try:
+        cur = await db.execute("SELECT id,name,handle FROM agents WHERE status='active' LIMIT 1"); agent = await cur.fetchone()
+        if not agent: raise HTTPException(400, "No active agent. Create an agent first.")
+        aid = f"apr-{uuid.uuid4().hex[:10]}"
+        title = "Send follow-up to programme partner"
+        description = f"{agent['name']} (@{agent['handle']}) wants to send an external message."
+        proposed = "Hi Sarah,\n\nFollowing up on the ISEYC youth programme partnership proposal. We have completed the eligibility review and the shortlist is ready for your feedback.\n\nBest regards"
+        await db.execute("INSERT INTO approvals (id,agent_id,goal_id,action_type,action_level,title,description,proposed_output,reason,status,created_at) VALUES (?,?,NULL,'messaging.send','consequential',?,?,?,?,'pending',?)",
+            (aid, agent["id"], title, description, proposed, "You asked for a partner follow-up after the shortlist was ready.", now_iso()))
+        await db.commit()
+        cur = await db.execute("SELECT * FROM approvals WHERE id=?", (aid,)); return dict(await cur.fetchone())
+    finally: await db.close()
+
+@app.post("/api/v1/approvals/{approval_id}/approve")
+async def approve(approval_id: str, body: ApprovalDecision, _auth=Depends(require_auth)):
+    db = await get_db()
+    try:
+        if not await (await db.execute("SELECT * FROM approvals WHERE id=? AND status='pending'", (approval_id,))).fetchone():
+            raise HTTPException(404, "Pending approval not found")
+        await db.execute("UPDATE approvals SET status='approved', decided_at=?, decision_note=? WHERE id=?", (now_iso(), body.note, approval_id))
+        await db.commit(); return {"ok": True, "status": "approved"}
+    finally: await db.close()
+
+@app.post("/api/v1/approvals/{approval_id}/reject")
+async def reject(approval_id: str, body: ApprovalDecision, _auth=Depends(require_auth)):
+    db = await get_db()
+    try:
+        if not await (await db.execute("SELECT * FROM approvals WHERE id=? AND status='pending'", (approval_id,))).fetchone():
+            raise HTTPException(404, "Pending approval not found")
+        await db.execute("UPDATE approvals SET status='rejected', decided_at=?, decision_note=? WHERE id=?", (now_iso(), body.note, approval_id))
+        await db.commit(); return {"ok": True, "status": "rejected"}
+    finally: await db.close()
+
+@app.post("/api/v1/goals")
+async def create_goal(body: GoalCreate, _auth=Depends(require_auth)):
+    gid = f"goal-{uuid.uuid4().hex[:8]}"; now = now_iso()
+    db = await get_db()
+    try:
+        await db.execute("INSERT INTO goals (id,title,description,status,created_at,updated_at) VALUES (?,?,?,'active',?,?)", (gid, body.title, body.description or "", now, now))
+        await log_event(db, gid, "goal.created", payload={"title": body.title}); await db.commit()
+        return {"id": gid, "title": body.title, "description": body.description or "", "status": "active", "agents": []}
+    finally: await db.close()
+
+@app.get("/api/v1/goals")
+async def list_goals(_auth=Depends(require_auth)):
+    db = await get_db()
+    try:
+        cur = await db.execute("SELECT * FROM goals WHERE status!='cancelled' ORDER BY updated_at DESC")
+        return [dict(r) for r in await cur.fetchall()]
+    finally: await db.close()
+
+@app.get("/api/v1/goals/{goal_id}")
+async def get_goal(goal_id: str, _auth=Depends(require_auth)):
+    db = await get_db()
+    try:
+        cur = await db.execute("SELECT * FROM goals WHERE id=?", (goal_id,)); row = await cur.fetchone()
+        if not row: raise HTTPException(404, "Goal not found")
+        goal = dict(row)
+        cur = await db.execute("SELECT ga.agent_id,a.name,a.handle,ga.role,ga.joined_at FROM goal_agents ga JOIN agents a ON a.id=ga.agent_id WHERE ga.goal_id=? ORDER BY ga.joined_at", (goal_id,))
+        goal["agents"] = [dict(r) for r in await cur.fetchall()]; return goal
+    finally: await db.close()
+
+@app.patch("/api/v1/goals/{goal_id}")
+async def update_goal(goal_id: str, body: GoalUpdate, _auth=Depends(require_auth)):
+    db = await get_db()
+    try:
+        if not await (await db.execute("SELECT * FROM goals WHERE id=?", (goal_id,))).fetchone(): raise HTTPException(404, "Goal not found")
+        updates, values = [], []
+        for f in ["title","description","status"]:
+            v = getattr(body, f)
+            if v is not None: updates.append(f"{f}=?"); values.append(v)
+        if updates:
+            updates.append("updated_at=?"); values.append(now_iso()); values.append(goal_id)
+            await db.execute(f"UPDATE goals SET {', '.join(updates)} WHERE id=?", values); await db.commit()
+        return {"ok": True}
+    finally: await db.close()
+
+@app.post("/api/v1/goals/{goal_id}/complete")
+async def complete_goal(goal_id: str, _auth=Depends(require_auth)):
+    db = await get_db()
+    try:
+        if not await (await db.execute("SELECT * FROM goals WHERE id=?", (goal_id,))).fetchone(): raise HTTPException(404, "Goal not found")
+        if await (await db.execute("SELECT 1 FROM handoffs WHERE goal_id=? AND status IN ('pending','accepted') LIMIT 1", (goal_id,))).fetchone():
+            raise HTTPException(409, "Resolve open handoffs before completing the goal")
+        await db.execute("UPDATE goals SET status='completed', updated_at=? WHERE id=?", (now_iso(), goal_id))
+        await log_event(db, goal_id, "goal.completed"); await db.commit()
+        return {"ok": True, "status": "completed"}
+    finally: await db.close()
+
+@app.get("/api/v1/goals/{goal_id}/agents")
+async def list_goal_agents(goal_id: str, _auth=Depends(require_auth)):
+    db = await get_db()
+    try:
+        cur = await db.execute("SELECT ga.agent_id,a.name,a.handle,ga.role,ga.joined_at FROM goal_agents ga JOIN agents a ON a.id=ga.agent_id WHERE ga.goal_id=? ORDER BY ga.joined_at", (goal_id,))
+        return [dict(r) for r in await cur.fetchall()]
+    finally: await db.close()
+
+@app.post("/api/v1/goals/{goal_id}/agents")
+async def add_goal_agent(goal_id: str, body: GoalAgentIn, _auth=Depends(require_auth)):
+    db = await get_db()
+    try:
+        cur = await db.execute("SELECT status FROM goals WHERE id=?", (goal_id,)); goal = await cur.fetchone()
+        if not goal: raise HTTPException(404, "Goal not found")
+        if goal["status"] in ("completed","cancelled"): raise HTTPException(409, f"Goal is {goal['status']}")
+        cur = await db.execute("SELECT id,status FROM agents WHERE id=?", (body.agent_id,)); agent = await cur.fetchone()
+        if not agent: raise HTTPException(404, "Agent not found")
+        if agent["status"]=="archived": raise HTTPException(409, "Agent is archived")
+        if await (await db.execute("SELECT 1 FROM goal_agents WHERE goal_id=? AND agent_id=?", (goal_id, body.agent_id))).fetchone():
+            raise HTTPException(409, "Agent is already on this goal")
+        if (await (await db.execute("SELECT COUNT(*) as c FROM goal_agents WHERE goal_id=?", (goal_id,))).fetchone())["c"] >= MAX_GOAL_AGENTS:
+            raise HTTPException(409, f"A goal can have at most {MAX_GOAL_AGENTS} agents")
+        await db.execute("INSERT INTO goal_agents (goal_id,agent_id,role,joined_at) VALUES (?,?,?,?)", (goal_id, body.agent_id, body.role, now_iso()))
+        await log_event(db, goal_id, "agent.joined", actor_type="agent", actor_id=body.agent_id, payload={"role": body.role}); await db.commit()
+        cur = await db.execute("SELECT ga.agent_id,a.name,a.handle,ga.role,ga.joined_at FROM goal_agents ga JOIN agents a ON a.id=ga.agent_id WHERE ga.goal_id=? AND ga.agent_id=?", (goal_id, body.agent_id))
+        return dict(await cur.fetchone())
+    finally: await db.close()
+
+@app.delete("/api/v1/goals/{goal_id}/agents/{agent_id}")
+async def remove_goal_agent(goal_id: str, agent_id: str, _auth=Depends(require_auth)):
+    db = await get_db()
+    try:
+        if not await (await db.execute("SELECT 1 FROM goal_agents WHERE goal_id=? AND agent_id=?", (goal_id, agent_id))).fetchone():
+            raise HTTPException(404, "Agent is not on this goal")
+        if await (await db.execute("SELECT 1 FROM handoffs WHERE goal_id=? AND status IN ('pending','accepted') AND (from_agent_id=? OR to_agent_id=?) LIMIT 1", (goal_id, agent_id, agent_id))).fetchone():
+            raise HTTPException(409, "Agent has an open handoff; resolve it first")
+        await db.execute("DELETE FROM goal_agents WHERE goal_id=? AND agent_id=?", (goal_id, agent_id))
+        await log_event(db, goal_id, "agent.removed", actor_type="agent", actor_id=agent_id); await db.commit()
+        return {"ok": True}
+    finally: await db.close()
+
+@app.post("/api/v1/goals/{goal_id}/handoffs")
+async def create_handoff(goal_id: str, body: HandoffCreate, _auth=Depends(require_auth)):
+    if body.from_agent_id == body.to_agent_id: raise HTTPException(400, "from_agent_id and to_agent_id must be different")
+    hid = f"ho-{uuid.uuid4().hex[:8]}"
+    db = await get_db()
+    try:
+        cur = await db.execute("SELECT status FROM goals WHERE id=?", (goal_id,)); goal = await cur.fetchone()
+        if not goal: raise HTTPException(404, "Goal not found")
+        if goal["status"] in ("completed","cancelled"): raise HTTPException(409, f"Goal is {goal['status']}")
+        for aid in (body.from_agent_id, body.to_agent_id):
+            if not await (await db.execute("SELECT 1 FROM goal_agents WHERE goal_id=? AND agent_id=?", (goal_id, aid))).fetchone():
+                raise HTTPException(409, f"Agent {aid} is not on this goal")
+        await db.execute("INSERT INTO handoffs (id,goal_id,from_agent_id,to_agent_id,title,instruction,context,status,created_at) VALUES (?,?,?,?,?,?,?,'pending',?)",
+            (hid, goal_id, body.from_agent_id, body.to_agent_id, body.title, body.instruction, body.context, now_iso()))
+        await log_event(db, goal_id, "handoff.created", actor_type="agent", actor_id=body.from_agent_id, payload={"handoff_id": hid, "to_agent_id": body.to_agent_id, "title": body.title})
+        await db.commit()
+        cur = await db.execute("SELECT h.*,fa.handle AS from_handle,ta.handle AS to_handle FROM handoffs h JOIN agents fa ON fa.id=h.from_agent_id JOIN agents ta ON ta.id=h.to_agent_id WHERE h.id=?", (hid,))
+        return dict(await cur.fetchone())
+    finally: await db.close()
+
+@app.get("/api/v1/goals/{goal_id}/handoffs")
+async def list_handoffs(goal_id: str, status: Optional[str]=None, _auth=Depends(require_auth)):
+    db = await get_db()
+    try:
+        sql = "SELECT h.*,fa.handle AS from_handle,ta.handle AS to_handle FROM handoffs h JOIN agents fa ON fa.id=h.from_agent_id JOIN agents ta ON ta.id=h.to_agent_id WHERE h.goal_id=?"
+        args: list = [goal_id]
+        if status: sql += " AND h.status=?"; args.append(status)
+        sql += " ORDER BY h.created_at DESC"
+        cur = await db.execute(sql, args); return [dict(r) for r in await cur.fetchall()]
+    finally: await db.close()
+
+async def _transition_handoff(handoff_id, allowed_from, new_status, event_type, body):
+    db = await get_db()
+    try:
+        cur = await db.execute("SELECT h.*,fa.handle AS from_handle,ta.handle AS to_handle FROM handoffs h JOIN agents fa ON fa.id=h.from_agent_id JOIN agents ta ON ta.id=h.to_agent_id WHERE h.id=?", (handoff_id,))
+        h = await cur.fetchone()
+        if not h: raise HTTPException(404, "Handoff not found")
+        if h["status"] not in allowed_from: raise HTTPException(409, f"Handoff is {h['status']}; must be {' or '.join(allowed_from)}")
+        completed_at = now_iso() if new_status in ("completed","rejected") else None
+        await db.execute("UPDATE handoffs SET status=?, completed_at=COALESCE(?,completed_at) WHERE id=?", (new_status, completed_at, handoff_id))
+        await log_event(db, h["goal_id"], event_type, actor_type="agent", actor_id=h["to_agent_id"], payload={"handoff_id": handoff_id, "note": body.note if body else None})
+        await db.commit()
+        cur = await db.execute("SELECT h.*,fa.handle AS from_handle,ta.handle AS to_handle FROM handoffs h JOIN agents fa ON fa.id=h.from_agent_id JOIN agents ta ON ta.id=h.to_agent_id WHERE h.id=?", (handoff_id,))
+        return dict(await cur.fetchone())
+    finally: await db.close()
+
+@app.post("/api/v1/handoffs/{handoff_id}/accept")
+async def accept_handoff(handoff_id: str, body: Optional[HandoffNote]=None, _auth=Depends(require_auth)):
+    return await _transition_handoff(handoff_id, ("pending",), "accepted", "handoff.accepted", body)
+@app.post("/api/v1/handoffs/{handoff_id}/complete")
+async def complete_handoff(handoff_id: str, body: Optional[HandoffNote]=None, _auth=Depends(require_auth)):
+    return await _transition_handoff(handoff_id, ("accepted",), "completed", "handoff.completed", body)
+@app.post("/api/v1/handoffs/{handoff_id}/reject")
+async def reject_handoff(handoff_id: str, body: Optional[HandoffNote]=None, _auth=Depends(require_auth)):
+    return await _transition_handoff(handoff_id, ("pending",), "rejected", "handoff.rejected", body)
+
+@app.get("/api/v1/goals/{goal_id}/events")
+async def list_goal_events(goal_id: str, limit: int=Query(50, le=200), _auth=Depends(require_auth)):
+    db = await get_db()
+    try:
+        cur = await db.execute("SELECT * FROM goal_events WHERE goal_id=? ORDER BY created_at DESC LIMIT ?", (goal_id, limit))
+        result = []
+        for r in await cur.fetchall():
+            d = dict(r)
+            try: d["payload"] = json.loads(d.get("payload") or "{}")
+            except Exception: d["payload"] = {}
+            result.append(d)
+        return result
+    finally: await db.close()
+
+@app.post("/api/v1/chat", response_model=ChatResponse)
+async def chat(req: ChatRequest, _auth=Depends(require_auth)):
+    thread_id = req.thread_id or f"thread-{uuid.uuid4().hex[:8]}"; message_id = f"msg-{uuid.uuid4().hex[:8]}"
+    model = req.model or DEFAULT_MODEL; now = now_iso()
+    system_prompt = req.system_prompt or "You are a helpful, concise personal AI agent on the user's phone. Be clear, practical, and respectful."
+    db = await get_db()
+    try:
+        if not await (await db.execute("SELECT id FROM threads WHERE id=?", (thread_id,))).fetchone():
+            title = req.message[:40] + ("…" if len(req.message) > 40 else "")
+            await db.execute("INSERT INTO threads (id,title,system_prompt,created_at,updated_at) VALUES (?,?,?,?,?)", (thread_id, title, system_prompt, now, now))
+        else:
+            await db.execute("UPDATE threads SET updated_at=? WHERE id=?", (now, thread_id))
+        await db.execute("INSERT INTO messages (id,thread_id,role,content,created_at) VALUES (?,?,?,?,?)", (f"msg-{uuid.uuid4().hex[:8]}", thread_id, "user", req.message, now))
+        cur = await db.execute("SELECT role,content FROM messages WHERE thread_id=? ORDER BY created_at ASC", (thread_id,))
+        messages = [{"role": "system", "content": system_prompt}]
+        for r in await cur.fetchall(): messages.append({"role": r["role"], "content": r["content"]})
+        reply = await call_model(messages, model)
+        await db.execute("INSERT INTO messages (id,thread_id,role,content,created_at) VALUES (?,?,?,?,?)", (message_id, thread_id, "assistant", reply, now_iso()))
+        await db.commit()
+    finally: await db.close()
+    return ChatResponse(thread_id=thread_id, reply=reply, message_id=message_id, model=model)
+
+@app.get("/api/v1/threads/{thread_id}/messages")
+async def get_messages(thread_id: str, _auth=Depends(require_auth)):
+    db = await get_db()
+    try:
+        cur = await db.execute("SELECT id,role,content,created_at FROM messages WHERE thread_id=? ORDER BY created_at ASC", (thread_id,))
+        return [dict(r) for r in await cur.fetchall()]
+    finally: await db.close()
+
+@app.get("/api/v1/threads")
+async def list_threads(_auth=Depends(require_auth)):
+    db = await get_db()
+    try:
+        cur = await db.execute("SELECT id,title,created_at,updated_at FROM threads ORDER BY updated_at DESC")
+        return [dict(r) for r in await cur.fetchall()]
+    finally: await db.close()
