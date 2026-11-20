@@ -9,25 +9,44 @@ Built to sell to individuals and organizations — without Vercel/Supabase lock-
 
 ---
 
-## Current status (v0.8)
+## Current status (personal operations foundation — in progress)
 
+### Existing foundation
 - [x] Mobile-first Next.js 15 PWA (Add to Home Screen)
-- [x] FastAPI + SQLite + Bearer auth
-- [x] Agent identity (name, handle, purpose, personality)
-- [x] Permissions (read / draft / consequential)
-- [x] Approval policies + inbox (approve / reject)
-- [x] **Simulate proposal** for testing the approval loop
-- [x] Goals + max 3 agents per goal
-- [x] Explicit handoffs (create / accept / complete / reject)
-- [x] Goal Room UI with status line (Manus guidance)
-- [x] Docker Compose + persistent volume
-- [x] `/health` + `/ready`
-- [x] Railway / self-host deploy docs
-- [ ] Streaming model replies
-- [ ] Real tool execution after approval
-- [ ] Notion / calendar connectors
-- [ ] Multi-user / org isolation
-- [ ] Capacitor native shells
+- [x] FastAPI + SQLite persistence
+- [x] Agent identity, permissions, and approval policies
+- [x] Approval inbox and proposal simulation
+- [x] Goals, bounded agent membership, and handoffs
+- [x] Read-only Crypto Intelligence module (fixture provider by default)
+- [x] Docker Compose and existing hosting documentation
+
+### Personal operations foundation (working branch)
+- [x] CI-only GitHub Actions for backend tests and frontend production builds
+- [x] Regression coverage for core API authentication and approval lifecycle
+- [x] Password-based owner login, rate-limited sign-in, short-lived signed sessions, and server-side logout revocation
+- [x] No permanent bearer token or privileged credential embedded in the browser bundle
+- [x] Approval proposals bound to immutable payload hashes, expiry, tamper detection, and single-use consumption
+- [x] Persistent project registry, tasks, checkpoints, decision records, and operating preferences
+- [x] Mobile Work tab for projects, tasks, preferences, and progress checkpoints
+- [x] Chat receives saved operating charter, project/task context, and recent checkpoints
+- [x] Server-controlled model selection and bounded chat history
+- [x] Structured model configuration/provider errors instead of placeholder assistant replies
+- [x] Frontend Dockerfile aligned with the existing non-standalone Next.js configuration
+- [x] Allowlisted read-only GitHub API endpoints for repository metadata, pull requests, workflow runs, trees, and text files
+- [x] Work tab GitHub inspector for repository health, open PRs, and recent workflow runs
+- [x] Bounded model-driven GitHub read-only tool calling with server-side allowlist and audit records
+
+### Not yet production-ready
+- [ ] Complete XSS/sessionStorage review and enforce a stricter Content Security Policy before enabling external tools
+- [ ] Add real write-tool execution only after end-to-end approval and security review
+- [ ] Typed tool registry and real tool execution after approval
+- [ ] Verified engineering workflows: repository changes, branch/PR creation and test execution after write-action approval gates
+- [x] Daily model-call budget, output-token ceiling, bounded history, and bounded tool-result context
+- [ ] Provider token accounting and actual currency-cost reporting
+- [ ] Daily briefing, reminders, and weekly review
+- [ ] Voice, calendar/email connectors, multi-user support
+
+**Important:** This branch is under development. The existing production deployment has not been changed. No production deployment, paid service, or merge to `main` is authorised by this work.
 
 ---
 
@@ -37,7 +56,7 @@ Built to sell to individuals and organizations — without Vercel/Supabase lock-
 git clone https://github.com/mrzulqarnainnadabo/agent-phone.git
 cd agent-phone
 cp .env.example .env
-# Set MODEL_API_KEY and APP_AUTH_TOKEN
+# Set APP_LOGIN_PASSWORD and SESSION_SECRET; add MODEL_API_KEY for real AI replies
 
 docker compose up --build
 ```
@@ -53,7 +72,8 @@ cd server
 python -m venv .venv && source .venv/bin/activate
 pip install -r requirements.txt
 export MODEL_API_KEY=sk-...
-export APP_AUTH_TOKEN=dev-token-change-me
+export APP_LOGIN_PASSWORD="your-long-owner-password"
+export SESSION_SECRET="$(openssl rand -hex 32)"
 python run.py
 ```
 

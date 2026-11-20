@@ -2,11 +2,13 @@
 
 import { useState, useEffect, useRef } from "react";
 import MarketsPanel from "./MarketsPanel";
+import WorkspacePanel from "./WorkspacePanel";
+import AuthScreen from "./AuthScreen";
+import { clearSessionToken, expireSession, getSessionToken } from "./auth";
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
-const AUTH_TOKEN = process.env.NEXT_PUBLIC_APP_AUTH_TOKEN || "dev-token-change-me";
 
-type Tab = "home" | "agents" | "goals" | "approvals" | "markets";
+type Tab = "home" | "workspace" | "agents" | "goals" | "approvals" | "markets";
 type Agent = { id: string; name: string; handle: string; purpose: string; personality?: string; status: string; approval_mode: string };
 type Approval = { id: string; agent_id: string; title: string; description: string; proposed_output?: string; status: string; created_at: string };
 type Goal = { id: string; title: string; description?: string; status: string; created_at: string; updated_at: string; agents?: GoalAgent[] };
@@ -17,9 +19,10 @@ type Message = { id: string; role: "user" | "assistant"; content: string };
 async function api(path: string, options: RequestInit = {}) {
   const res = await fetch(`${API_URL}${path}`, {
     ...options,
-    headers: { "Content-Type": "application/json", Authorization: `Bearer ${AUTH_TOKEN}`, ...(options.headers || {}) },
+    headers: { "Content-Type": "application/json", Authorization: `Bearer ${getSessionToken()}`, ...(options.headers || {}) },
   });
   if (!res.ok) {
+    if (res.status === 401) expireSession();
     const err = await res.json().catch(() => ({}));
     throw new Error(err.detail || `HTTP ${res.status}`);
   }
@@ -27,11 +30,14 @@ async function api(path: string, options: RequestInit = {}) {
 }
 
 export default function Home() {
+  const [authReady, setAuthReady] = useState(false);
+  const [authenticated, setAuthenticated] = useState(false);
   const [tab, setTab] = useState<Tab>("home");
   const [agents, setAgents] = useState<Agent[]>([]);
   const [approvals, setApprovals] = useState<Approval[]>([]);
   const [goals, setGoals] = useState<Goal[]>([]);
   const [pendingCount, setPendingCount] = useState(0);
+  const [approvalNotice, setApprovalNotice] = useState("");
   const [showCreate, setShowCreate] = useState(false);
   const [showCreateGoal, setShowCreateGoal] = useState(false);
   const [activeGoalId, setActiveGoalId] = useState<string | null>(null);
@@ -42,8 +48,21 @@ export default function Home() {
   const [chatLoading, setChatLoading] = useState(false);
   const bottomRef = useRef<HTMLDivElement>(null);
 
-  useEffect(() => { loadAgents(); loadApprovals(); loadGoals(); }, []);
+  useEffect(() => {
+    setAuthenticated(Boolean(getSessionToken()));
+    setAuthReady(true);
+    const onExpired = () => setAuthenticated(false);
+    window.addEventListener("agent-phone-session-expired", onExpired);
+    return () => window.removeEventListener("agent-phone-session-expired", onExpired);
+  }, []);
+  useEffect(() => {
+    if (authenticated) { loadAgents(); loadApprovals(); loadGoals(); loadConversation(); }
+  }, [authenticated]);
   useEffect(() => { bottomRef.current?.scrollIntoView({ behavior: "smooth" }); }, [messages]);
+
+  if (!authReady) return <main className="min-h-dvh bg-gray-950 text-gray-400 flex items-center justify-center text-sm">Loading Agent Phone…</main>;
+  if (!authenticated) return <AuthScreen onAuthenticated={() => setAuthenticated(true)} />;
+
 
   async function loadAgents() { try { setAgents(await api("/api/v1/agents")); } catch (e) { console.error(e); } }
   async function loadApprovals() {
@@ -53,6 +72,32 @@ export default function Home() {
     } catch (e) { console.error(e); }
   }
   async function loadGoals() { try { setGoals(await api("/api/v1/goals")); } catch (e) { console.error(e); } }
+
+  async function loadConversation() {
+    try {
+      const threads = await api("/api/v1/threads");
+      if (!threads.length) return;
+      const latest = threads[0];
+      const history = await api(`/api/v1/threads/${latest.id}/messages`);
+      if (history.length) {
+        setThreadId(latest.id);
+        setMessages(history.map((message: any) => ({
+          id: message.id, role: message.role, content: message.content,
+        })));
+      }
+    } catch (e) { console.error(e); }
+  }
+
+  async function signOut() {
+    try { await api("/api/v1/auth/logout", { method: "POST" }); }
+    catch (error) { console.error(error); }
+    finally { clearSessionToken(); setAuthenticated(false); }
+  }
+
+  function startNewChat() {
+    setThreadId(null);
+    setMessages([{ id: "welcome", role: "assistant", content: "Welcome back. What should we work on?" }]);
+  }
 
   async function sendChat() {
     const text = input.trim();
@@ -71,7 +116,8 @@ export default function Home() {
   async function decideApproval(id: string, action: "approve" | "reject") {
     setLoading(true);
     try {
-      await api(`/api/v1/approvals/${id}/${action}`, { method: "POST", body: JSON.stringify({ note: action === "approve" ? "Approved" : "Rejected" }) });
+      const result = await api(`/api/v1/approvals/${id}/${action}`, { method: "POST", body: JSON.stringify({ note: action === "approve" ? "Approved" : "Rejected" }) });
+      setApprovalNotice(action === "approve" && result.execution_status === "not_executed" ? "Approval recorded. No external action has been executed." : action === "approve" ? "Approval recorded." : "Proposal rejected.");
       await loadApprovals();
     } catch (e) { console.error(e); } finally { setLoading(false); }
   }
@@ -93,9 +139,12 @@ export default function Home() {
       <main className="flex-1 overflow-y-auto">
         {tab === "home" && (
           <div className="flex flex-col h-full">
-            <header className="px-4 py-3 border-b border-gray-800">
-              <h1 className="text-lg font-semibold">Agent Phone</h1>
-              <p className="text-xs text-gray-400">Control room</p>
+            <header className="px-4 py-3 border-b border-gray-800 flex items-center justify-between gap-3">
+              <div>
+                <h1 className="text-lg font-semibold">Agent Phone</h1>
+                <p className="text-xs text-gray-400">Personal operations</p>
+              </div>
+              <div className="flex items-center gap-2"><button onClick={startNewChat} className="rounded-full border border-gray-700 px-3 py-1.5 text-xs text-gray-300">New chat</button><button onClick={signOut} className="rounded-full border border-gray-800 px-3 py-1.5 text-xs text-gray-500">Sign out</button></div>
             </header>
             <div className="flex-1 px-3 py-4 space-y-3 overflow-y-auto">
               {messages.map((msg) => (
@@ -150,6 +199,8 @@ export default function Home() {
               <h1 className="text-lg font-semibold">Approvals</h1>
               <button onClick={simulateProposal} disabled={loading} className="text-xs bg-gray-800 border border-gray-700 px-3 py-1.5 rounded-full">Simulate proposal</button>
             </div>
+            <p className="text-xs text-gray-500">Approving records authorization for the exact proposed action. It does not send, publish, merge or execute anything in this version.</p>
+            {approvalNotice && <p role="status" className="rounded-xl border border-gray-700 bg-gray-900 p-3 text-xs text-gray-300">{approvalNotice}</p>}
             {approvals.map((a) => (
               <div key={a.id} className="bg-gray-900 border border-gray-800 rounded-2xl p-4 space-y-2">
                 <div className="font-medium">{a.title}</div>
@@ -157,18 +208,19 @@ export default function Home() {
                 {a.proposed_output && <pre className="text-xs bg-gray-950 p-2 rounded-xl whitespace-pre-wrap">{a.proposed_output}</pre>}
                 <div className="flex gap-2">
                   <button onClick={() => decideApproval(a.id, "reject")} className="flex-1 py-2 rounded-xl border border-gray-700 text-sm">Reject</button>
-                  <button onClick={() => decideApproval(a.id, "approve")} className="flex-1 py-2 rounded-xl bg-sky-600 text-sm">Approve</button>
+                  <button onClick={() => decideApproval(a.id, "approve")} className="flex-1 py-2 rounded-xl bg-sky-600 text-sm">Authorize proposal</button>
                 </div>
               </div>
             ))}
           </div>
         )}
+        {tab === "workspace" && <WorkspacePanel />}
         {tab === "markets" && <MarketsPanel />}
       </main>
       <nav className="border-t border-gray-800 bg-gray-950 px-2 py-2 flex justify-around">
-        {([{ id: "home", label: "Home" }, { id: "agents", label: "Agents" }, { id: "goals", label: "Goals" }, { id: "approvals", label: "Approvals" }, { id: "markets", label: "Markets" }] as const).map((t) => (
+        {([{ id: "home", label: "Home" }, { id: "workspace", label: "Work" }, { id: "agents", label: "Agents" }, { id: "goals", label: "Goals" }, { id: "approvals", label: "Approvals" }, { id: "markets", label: "Markets" }] as const).map((t) => (
           <button key={t.id} onClick={() => setTab(t.id)} className={`relative flex flex-col items-center px-2 py-1.5 rounded-xl text-xs font-medium ${tab === t.id ? "text-sky-500" : "text-gray-500"}`}>
-            <span className="text-lg leading-none mb-0.5">{t.id === "home" ? "⌂" : t.id === "agents" ? "◎" : t.id === "goals" ? "◇" : t.id === "approvals" ? "✓" : "◈"}</span>
+            <span className="text-lg leading-none mb-0.5">{t.id === "home" ? "⌂" : t.id === "workspace" ? "▤" : t.id === "agents" ? "◎" : t.id === "goals" ? "◇" : t.id === "approvals" ? "✓" : "◈"}</span>
             {t.label}
             {t.id === "approvals" && pendingCount > 0 && (
               <span className="absolute -top-0.5 right-0 bg-red-500 text-white text-[10px] w-4 h-4 rounded-full flex items-center justify-center">{pendingCount}</span>

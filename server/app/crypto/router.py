@@ -1,7 +1,7 @@
 """Crypto Intelligence HTTP routes — read-only market research."""
 from __future__ import annotations
 
-from typing import List, Optional
+from typing import List
 
 from fastapi import APIRouter, Depends, Header, HTTPException, Query
 
@@ -16,21 +16,9 @@ from .schema import (
     WatchlistItem,
 )
 from . import service
+from app.core_helpers import require_auth
 
 router = APIRouter(prefix="/api/v1/crypto", tags=["crypto"])
-
-
-async def require_auth(authorization: Optional[str] = Header(None)):
-    import os
-
-    token = os.getenv("APP_AUTH_TOKEN", "dev-token-change-me")
-    if not token:
-        return True
-    if not authorization or not authorization.startswith("Bearer "):
-        raise HTTPException(401, "Missing or invalid Authorization header")
-    if authorization[7:].strip() != token:
-        raise HTTPException(401, "Invalid token")
-    return True
 
 
 async def get_db():

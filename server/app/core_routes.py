@@ -2,6 +2,8 @@
 from __future__ import annotations
 
 from typing import Optional, List
+import hashlib, hmac, json
+from datetime import datetime, timezone
 from fastapi import FastAPI, HTTPException, Depends, Query
 
 from app.core_helpers import (
@@ -11,6 +13,7 @@ from app.core_helpers import (
     GoalAgentIn, HandoffCreate, HandoffNote, MAX_GOAL_AGENTS,
 )
 import uuid
+from app.approval_create import create_pending_approval
 
 def register_core(app: FastAPI) -> None:
     @app.on_event("startup")
@@ -119,6 +122,39 @@ def register_core(app: FastAPI) -> None:
         finally:
             await db.close()
 
+    @app.post("/api/v1/approvals")
+    async def create_approval(body: ApprovalCreate, _auth=Depends(require_auth)):
+        db = await get_db()
+        try:
+            agent = await (await db.execute(
+                "SELECT id FROM agents WHERE id=? AND status='active'", (body.agent_id,)
+            )).fetchone()
+            if not agent:
+                raise HTTPException(404, "Active agent not found")
+            if body.goal_id:
+                goal = await (await db.execute(
+                    "SELECT id FROM goals WHERE id=? AND status='active'", (body.goal_id,)
+                )).fetchone()
+                if not goal:
+                    raise HTTPException(404, "Active goal not found")
+            approval = await create_pending_approval(
+                db,
+                agent_id=body.agent_id,
+                title=body.title,
+                description=body.description,
+                action_type=body.action_type,
+                action_level=body.action_level,
+                proposed_output=body.proposed_output,
+                proposed_input=body.proposed_input,
+                reason=body.reason,
+                goal_id=body.goal_id,
+                action_payload=body.action_payload,
+            )
+            await db.commit()
+            return approval
+        finally:
+            await db.close()
+
     @app.post("/api/v1/approvals/demo")
     async def create_demo_approval(_auth=Depends(require_auth)):
         db = await get_db()
@@ -127,39 +163,91 @@ def register_core(app: FastAPI) -> None:
             row = await cur.fetchone()
             if not row:
                 raise HTTPException(400, "No active agent")
-            aid = row["id"]
-            apid = f"apr-{uuid.uuid4().hex[:10]}"
-            await db.execute(
-                "INSERT INTO approvals (id,agent_id,action_type,action_level,title,description,proposed_output,reason,status,created_at) VALUES (?,?,?,?,?,?,?,?,?,?)",
-                (apid, aid, "messaging.send", "consequential", "Send follow-up to programme partner",
-                 "Agent wants to send an external message.",
-                 "Hi Sarah,\n\nFollowing up on the partnership proposal.\n\nBest regards",
-                 "Partner follow-up after shortlist.", "pending", now_iso()),
+            message = "Hi Sarah,\\n\\nFollowing up on the partnership proposal.\\n\\nBest regards"
+            approval = await create_pending_approval(
+                db,
+                agent_id=row["id"],
+                action_type="messaging.send",
+                action_level="consequential",
+                title="Send follow-up to programme partner",
+                description="Agent wants to send an external message.",
+                proposed_input="Follow up on the partnership proposal.",
+                proposed_output=message,
+                reason="Partner follow-up after shortlist.",
+                action_payload={
+                    "channel": "email",
+                    "recipient_name": "Sarah",
+                    "recipient_address": None,
+                    "subject": "Partnership proposal follow-up",
+                    "body": message,
+                },
             )
             await db.commit()
-            cur = await db.execute("SELECT * FROM approvals WHERE id=?", (apid,))
-            return dict(await cur.fetchone())
+            return approval
+        finally:
+            await db.close()
+
+    async def _decide_approval(approval_id: str, decision: str, note: Optional[str]):
+        db = await get_db()
+        try:
+            cur = await db.execute("SELECT * FROM approvals WHERE id=?", (approval_id,))
+            row = await cur.fetchone()
+            if not row:
+                raise HTTPException(404, "Approval not found")
+            if row["status"] != "pending":
+                raise HTTPException(409, f"Approval is already {row['status']}")
+
+            if decision == "approved":
+                payload_json = row["action_payload_json"]
+                payload_hash = row["payload_hash"]
+                expires_at = row["expires_at"]
+                if not payload_json or not payload_hash or not expires_at:
+                    raise HTTPException(409, "Approval is not bound to a verifiable action payload")
+                try:
+                    payload = json.loads(payload_json)
+                    canonical = json.dumps(payload, sort_keys=True, separators=(",", ":"), ensure_ascii=False)
+                    computed_hash = hashlib.sha256(canonical.encode("utf-8")).hexdigest()
+                    expiry = datetime.fromisoformat(expires_at)
+                    if expiry.tzinfo is None:
+                        expiry = expiry.replace(tzinfo=timezone.utc)
+                except (ValueError, TypeError, json.JSONDecodeError):
+                    raise HTTPException(409, "Approval payload or expiry is invalid")
+                if not hmac.compare_digest(computed_hash, payload_hash):
+                    await db.execute(
+                        "UPDATE approvals SET status='cancelled', decided_at=?, decision_note=? WHERE id=? AND status='pending'",
+                        (now_iso(), "Action payload integrity check failed.", approval_id),
+                    )
+                    await db.commit()
+                    raise HTTPException(409, "Approval payload has changed; proposal was cancelled")
+                if expiry <= datetime.now(timezone.utc):
+                    await db.execute(
+                        "UPDATE approvals SET status='expired', decided_at=?, decision_note=? WHERE id=? AND status='pending'",
+                        (now_iso(), "Approval expired before decision.", approval_id),
+                    )
+                    await db.commit()
+                    raise HTTPException(409, "Approval has expired")
+                if row["executed_at"]:
+                    raise HTTPException(409, "Approval has already been consumed")
+
+            cur = await db.execute(
+                "UPDATE approvals SET status=?, decided_at=?, decision_note=? WHERE id=? AND status='pending'",
+                (decision, now_iso(), note or decision.capitalize(), approval_id),
+            )
+            if cur.rowcount != 1:
+                await db.rollback()
+                raise HTTPException(409, "Approval was already decided")
+            await db.commit()
+            result = {"ok": True, "status": decision}
+            if decision == "approved":
+                result["execution_status"] = "not_executed"
+            return result
         finally:
             await db.close()
 
     @app.post("/api/v1/approvals/{approval_id}/approve")
     async def approve(approval_id: str, body: ApprovalDecision, _auth=Depends(require_auth)):
-        db = await get_db()
-        try:
-            await db.execute("UPDATE approvals SET status='approved', decided_at=?, decision_note=? WHERE id=?",
-                (now_iso(), body.note or "Approved", approval_id))
-            await db.commit()
-            return {"ok": True, "status": "approved"}
-        finally:
-            await db.close()
+        return await _decide_approval(approval_id, "approved", body.note)
 
     @app.post("/api/v1/approvals/{approval_id}/reject")
     async def reject(approval_id: str, body: ApprovalDecision, _auth=Depends(require_auth)):
-        db = await get_db()
-        try:
-            await db.execute("UPDATE approvals SET status='rejected', decided_at=?, decision_note=? WHERE id=?",
-                (now_iso(), body.note or "Rejected", approval_id))
-            await db.commit()
-            return {"ok": True, "status": "rejected"}
-        finally:
-            await db.close()
+        return await _decide_approval(approval_id, "rejected", body.note)

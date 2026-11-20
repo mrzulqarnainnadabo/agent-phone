@@ -1,9 +1,9 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import { expireSession, getSessionToken } from "./auth";
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
-const AUTH_TOKEN = process.env.NEXT_PUBLIC_APP_AUTH_TOKEN || "dev-token-change-me";
 
 type CryptoQuote = {
   asset_id: string;
@@ -37,11 +37,12 @@ async function api(path: string, options: RequestInit = {}) {
     ...options,
     headers: {
       "Content-Type": "application/json",
-      Authorization: `Bearer ${AUTH_TOKEN}`,
+      Authorization: `Bearer ${getSessionToken()}`,
       ...(options.headers || {}),
     },
   });
   if (!res.ok) {
+    if (res.status === 401) expireSession();
     const err = await res.json().catch(() => ({}));
     throw new Error(err.detail?.detail || err.detail || `HTTP ${res.status}`);
   }

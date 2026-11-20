@@ -1,122 +1,93 @@
 # Deploy Agent Phone
 
-Goal: a public HTTPS demo a tester can open on their phone, create agents/goals, simulate approvals, and not lose data after a restart.
+This guide describes the existing hosting layout. **Do not deploy this development branch until the owner has explicitly approved the deployment and configured the new session secrets.**
 
----
+## Security pre-flight
 
-## Pre-flight checklist
+The personal-operations branch replaces the permanent browser-visible bearer token with password login and short-lived signed sessions.
 
-- [ ] `APP_AUTH_TOKEN` is a long random string (not `dev-token-change-me`)
-- [ ] `MODEL_API_KEY` is set (or accept placeholder replies)
-- [ ] SQLite lives on a **persistent volume** (`DATA_DIR=/data`)
-- [ ] `/health` and `/ready` return OK
-- [ ] Every non-health API route requires Bearer auth
-- [ ] Frontend `NEXT_PUBLIC_API_URL` points at the **public** API URL (HTTPS)
-- [ ] No real messaging/send/delete tools enabled for the public demo
-- [ ] Smoke test: create agent → create goal → handoff → simulate approval → approve/reject → restart → data still there
+Required backend environment variables:
 
----
+- `APP_LOGIN_PASSWORD`: a unique owner password of at least 12 characters.
+- `SESSION_SECRET`: at least 32 random bytes, generated with `openssl rand -hex 32`.
+- `SESSION_TTL_SECONDS`: optional; defaults to 28,800 seconds (8 hours).
+- `MODEL_API_KEY`: optional for non-AI workspace features; required for real model replies.
+- `MODEL_API_BASE_URL`: defaults to `https://api.openai.com/v1`.
+- `DEFAULT_MODEL`: defaults to `gpt-4o-mini`.
+- `MODEL_MAX_TOKENS`: defaults to 1,024 output tokens per model call.
+- `MODEL_DAILY_CALL_LIMIT`: defaults to 60 model calls per UTC day, including tool-call rounds.
+- `APP_ENV=production`.
+- `CORS_ORIGINS`: exact trusted frontend origin(s), for example `https://agent-phone.netlify.app`; production startup fails if this is empty.
+- `DATA_DIR`: persistent SQLite directory.
+- `GITHUB_TOKEN`: optional fine-grained GitHub token with read-only repository metadata, contents, pull requests, and Actions permissions.
+- `GITHUB_ALLOWED_REPOS`: comma-separated exact `owner/repository` allowlist. Leave empty to disable GitHub inspection.
 
-## Railway (recommended)
+Never put `APP_LOGIN_PASSWORD`, `SESSION_SECRET`, `GITHUB_TOKEN`, or a model API key in a `NEXT_PUBLIC_*` variable or frontend build argument. Give the GitHub token read-only scopes and restrict it to the exact repositories in the allowlist.
 
-### 1. Backend (API)
+Frontend environment:
 
-1. New Railway project → **Deploy from GitHub** → this repo.
-2. Root directory / service: `server`
-3. Start command: `python run.py` (or use the Dockerfile)
-4. Add a **Volume** mounted at `/data`
-5. Environment variables:
+- `NEXT_PUBLIC_API_URL`: public HTTPS URL of the FastAPI service.
 
-```
-MODEL_API_KEY=sk-...
-MODEL_API_BASE_URL=https://api.openai.com/v1
-DEFAULT_MODEL=gpt-4o-mini
-APP_AUTH_TOKEN=<long-random-string>
-DATA_DIR=/data
-HOST=0.0.0.0
-PORT=8000
-```
+There is no frontend authentication-token environment variable. The owner signs in through the app; the browser receives an expiring session token and stores it in the current browser session.
 
-6. Enable **public networking** → copy the HTTPS URL (e.g. `https://agent-phone-api.up.railway.app`)
+## Existing Railway + Netlify layout
 
-7. Verify:
+### 1. Backend API
 
-```bash
-curl https://YOUR-API.up.railway.app/health
-curl https://YOUR-API.up.railway.app/ready
-```
+If/when deployment is approved:
 
-### 2. Frontend (PWA)
+1. Use the existing API service; do not provision a new hosting product.
+2. Keep the persistent volume mounted at `/data` and set `DATA_DIR=/data`.
+3. Set `APP_LOGIN_PASSWORD` and `SESSION_SECRET` in the hosting provider's server-side environment settings.
+4. Set `SESSION_TTL_SECONDS=28800` unless a different session duration is deliberately chosen.
+5. Keep `MODEL_API_KEY` server-side only.
+6. Confirm HTTPS is enabled.
+7. Verify `/health` and `/ready`.
 
-1. Add a second service from the same repo, root `client`
-2. Build: `npm install && npm run build`
-3. Start: `npm start` (or use Dockerfile)
-4. Build-time / env vars:
+### 2. Frontend PWA
 
-```
-NEXT_PUBLIC_API_URL=https://YOUR-API.up.railway.app
-NEXT_PUBLIC_APP_AUTH_TOKEN=<same-as-backend>
-```
-
-**Important:** `NEXT_PUBLIC_*` values are baked in at **build** time for Next.js. If you change the API URL, rebuild the frontend.
-
-5. Enable public networking → open the web URL on your phone.
-
-### 3. Phone install
-
-- **iOS Safari** → Share → Add to Home Screen  
-- **Android Chrome** → Menu → Install app / Add to Home screen  
-
-Opens full-screen as a PWA.
-
----
-
-## Docker Compose (self-host / VPS)
-
-```bash
-cp .env.example .env
-# edit: MODEL_API_KEY, APP_AUTH_TOKEN, NEXT_PUBLIC_API_URL
-
-docker compose up -d --build
-```
-
-- API: http://localhost:8000  
-- Web: http://localhost:3000  
-- Data: Docker volume `agent_phone_data` (survives restarts)
-
-For a public VPS, put a reverse proxy (Caddy/Nginx) with HTTPS in front and set `NEXT_PUBLIC_API_URL` to that HTTPS API URL before building the web image.
-
----
-
-## Render
-
-Same pattern:
-
-1. **Web Service** for FastAPI (`server/`, Docker or `python run.py`)
-2. Disk / persistent storage for `/data`
-3. **Web Service** or static for Next.js (`client/`)
-4. Env vars as above
-
----
-
-## Smoke test after deploy
+The frontend needs only:
 
 ```text
-1. Open PWA URL on phone
-2. Agents → + New → create Atlas
-3. Approvals → Simulate proposal → Approve
-4. Goals → + New → add agent → open room → Handoff
-5. Restart the API service
-6. Confirm agents / goals / approvals still exist
+NEXT_PUBLIC_API_URL=https://YOUR-API-URL
 ```
 
-If step 6 fails, the volume is not mounted correctly.
+Do not add an API bearer token to Netlify or any `NEXT_PUBLIC_*` variable. Rebuild the frontend after changing the API URL because Next.js public environment variables are baked in at build time.
 
----
+### 3. Phone sign-in
 
-## Security notes for a public demo
+1. Open the PWA URL.
+2. Enter the owner password configured on the API service.
+3. The API issues an expiring signed session.
+4. Sign out when finished; sessions also expire automatically.
 
-- Change `APP_AUTH_TOKEN` before sharing the link.
-- Share the token only with trusted testers (or add a simple login later).
-- Do not enable real external send/delete tools yet.
-- Demo approvals are safe: they record decisions only; they do not send email/SMS.
+## Local Docker Compose
+
+1. Copy `.env.example` to `.env`.
+2. Set a unique `APP_LOGIN_PASSWORD`.
+3. Generate `SESSION_SECRET` with `openssl rand -hex 32`.
+4. Optionally set `MODEL_API_KEY` for real AI replies.
+5. Set `NEXT_PUBLIC_API_URL=http://localhost:8000`.
+6. Run:
+
+```bash
+docker compose up --build
+```
+
+The default placeholder values intentionally do not permit login. Configure real secrets before use.
+
+## Smoke-test checklist
+
+- Owner login succeeds with the configured password.
+- Incorrect passwords are rejected and repeated failures are rate-limited.
+- Protected API routes reject missing, malformed, and expired sessions.
+- Session tokens are not embedded in the frontend bundle.
+- Create a project, create a task, save a checkpoint, reload, and confirm records persist.
+- Restart the API and confirm SQLite data remains on the persistent volume.
+- Confirm no deployment or external write action is enabled by CI.
+
+## Existing deployment compatibility
+
+The current `main` branch still uses the previous bearer-token contract. This branch changes the API authentication contract. Do not merge or deploy it until the new backend environment variables are configured and the frontend/API pair are deployed together under an approved change window.
+
+Production deployment, credential changes, and merging to `main` remain separate approval decisions.
