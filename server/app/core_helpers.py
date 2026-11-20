@@ -4,7 +4,7 @@ from __future__ import annotations
 from typing import Optional, List
 from fastapi import HTTPException, Depends, Header, Query
 from pydantic import BaseModel, Field
-import os, uuid, json, aiosqlite, httpx, hmac
+import os, uuid, json, aiosqlite, httpx, hmac, hashlib, base64, time
 from datetime import datetime
 from pathlib import Path
 
@@ -13,18 +13,66 @@ DB_PATH = DATA_DIR / "agent_phone.db"
 MODEL_API_KEY = os.getenv("MODEL_API_KEY", "")
 MODEL_API_BASE_URL = os.getenv("MODEL_API_BASE_URL", "https://api.openai.com/v1").rstrip("/")
 DEFAULT_MODEL = os.getenv("DEFAULT_MODEL", "gpt-4o-mini")
-APP_AUTH_TOKEN = os.getenv("APP_AUTH_TOKEN", "")
+APP_LOGIN_PASSWORD = os.getenv("APP_LOGIN_PASSWORD", "")
+SESSION_SECRET = os.getenv("SESSION_SECRET", "")
+try:
+    SESSION_TTL_SECONDS = max(300, min(86400, int(os.getenv("SESSION_TTL_SECONDS", "28800"))))
+except ValueError:
+    SESSION_TTL_SECONDS = 28800
 MAX_GOAL_AGENTS = 3
 
+def _b64url_encode(value: bytes) -> str:
+    return base64.urlsafe_b64encode(value).decode("ascii").rstrip("=")
+
+
+def _session_configured() -> bool:
+    return (
+        len(APP_LOGIN_PASSWORD) >= 12
+        and len(SESSION_SECRET) >= 32
+        and APP_LOGIN_PASSWORD not in {"change-me", "change-me-to-a-long-random-string"}
+        and SESSION_SECRET not in {"change-me", "change-me-to-a-long-random-string"}
+    )
+
+
+def create_session_token() -> str:
+    if not _session_configured():
+        raise HTTPException(503, "Session authentication is not configured securely")
+    now = int(time.time())
+    payload = _b64url_encode(json.dumps(
+        {"sub": "owner", "iat": now, "exp": now + SESSION_TTL_SECONDS},
+        separators=(",", ":"),
+    ).encode("utf-8"))
+    signature = hmac.new(SESSION_SECRET.encode("utf-8"), payload.encode("ascii"), hashlib.sha256).digest()
+    return payload + "." + _b64url_encode(signature)
+
+
+def verify_session_token(token: str) -> bool:
+    if not _session_configured() or "." not in token:
+        return False
+    payload, supplied_signature = token.split(".", 1)
+    expected = _b64url_encode(hmac.new(
+        SESSION_SECRET.encode("utf-8"), payload.encode("ascii"), hashlib.sha256
+    ).digest())
+    if not hmac.compare_digest(supplied_signature, expected):
+        return False
+    try:
+        padded = payload + "=" * (-len(payload) % 4)
+        data = json.loads(base64.urlsafe_b64decode(padded.encode("ascii")))
+        return data.get("sub") == "owner" and int(data.get("exp", 0)) > int(time.time())
+    except (ValueError, TypeError, json.JSONDecodeError):
+        return False
+
+
 async def require_auth(authorization: Optional[str] = Header(None)):
-    if not APP_AUTH_TOKEN or APP_AUTH_TOKEN in {"dev-token-change-me", "change-me-to-a-long-random-string"}:
-        raise HTTPException(503, "Authentication is not configured with a production-safe token")
+    if not _session_configured():
+        raise HTTPException(503, "Session authentication is not configured securely")
     if not authorization or not authorization.startswith("Bearer "):
         raise HTTPException(401, "Missing or invalid Authorization header")
-    supplied = authorization[7:].strip()
-    if not hmac.compare_digest(supplied, APP_AUTH_TOKEN):
-        raise HTTPException(401, "Invalid token")
+    token = authorization[7:].strip()
+    if not verify_session_token(token):
+        raise HTTPException(401, "Session is invalid or expired")
     return True
+
 
 async def get_db():
     db = await aiosqlite.connect(DB_PATH)
