@@ -15,6 +15,7 @@ type Task = {
   priority: string; due_date?: string | null;
 };
 type ToolAudit = { id: string; thread_id: string; tool_name: string; arguments_json: string; outcome: string; created_at: string };
+type Usage = { calls_today: number; daily_limit: number; remaining: number };
 type Overview = {
   active_projects: number;
   tasks: Record<string, number>;
@@ -72,18 +73,20 @@ export default function WorkspacePanel() {
   const [githubLoading, setGithubLoading] = useState(false);
   const [githubError, setGithubError] = useState("");
   const [toolAudit, setToolAudit] = useState<ToolAudit[]>([]);
+  const [usage, setUsage] = useState<Usage | null>(null);
 
   async function load() {
     setLoading(true);
     setError("");
     try {
-      const [projectList, taskList, summary, settings, githubStatus, audit] = await Promise.all([
+      const [projectList, taskList, summary, settings, githubStatus, audit, usageSummary] = await Promise.all([
         api("/api/v1/workspace/projects"),
         api("/api/v1/workspace/tasks?limit=50"),
         api("/api/v1/workspace/overview"),
         api("/api/v1/workspace/settings"),
         api("/api/v1/github/status"),
         api("/api/v1/tools/audit?limit=10"),
+        api("/api/v1/usage"),
       ]);
       setProjects(projectList);
       setTasks(taskList);
@@ -92,6 +95,7 @@ export default function WorkspacePanel() {
       setAutonomyMode(settings.autonomy_mode?.value || "hybrid");
       setGithubConfigured(Boolean(githubStatus.configured));
       setToolAudit(audit);
+      setUsage(usageSummary);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Could not load workspace");
     } finally {
@@ -237,6 +241,10 @@ export default function WorkspacePanel() {
       {error && <div role="alert" className="rounded-xl border border-red-900 bg-red-950/40 p-3 text-sm text-red-200">{error}</div>}
 
       <section className="grid grid-cols-3 gap-2">
+        <div className="col-span-3 flex items-center justify-between rounded-xl border border-gray-800 bg-gray-900 px-3 py-2.5 text-xs">
+          <span className="text-gray-400">AI calls today</span>
+          <span className="font-medium tabular-nums">{usage ? `${usage.calls_today} / ${usage.daily_limit} · ${usage.remaining} remaining` : "—"}</span>
+        </div>
         <div className="rounded-xl border border-gray-800 bg-gray-900 p-3">
           <div className="text-xl font-semibold">{overview?.active_projects ?? "—"}</div>
           <div className="text-[11px] text-gray-500">Active projects</div>
