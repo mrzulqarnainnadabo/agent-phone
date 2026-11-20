@@ -18,6 +18,7 @@ type Overview = {
   active_projects: number;
   tasks: Record<string, number>;
   priority_tasks: Task[];
+  recent_checkpoints: { id: string; summary: string; next_action: string; blockers: string; created_at: string }[];
 };
 
 async function api(path: string, options: RequestInit = {}) {
@@ -53,6 +54,11 @@ export default function WorkspacePanel() {
   const [taskProject, setTaskProject] = useState("");
   const [taskPriority, setTaskPriority] = useState("normal");
   const [saving, setSaving] = useState(false);
+  const [checkpointTaskId, setCheckpointTaskId] = useState<string | null>(null);
+  const [checkpointSummary, setCheckpointSummary] = useState("");
+  const [checkpointCompleted, setCheckpointCompleted] = useState("");
+  const [checkpointNext, setCheckpointNext] = useState("");
+  const [checkpointBlockers, setCheckpointBlockers] = useState("");
 
   async function load() {
     setLoading(true);
@@ -128,6 +134,31 @@ export default function WorkspacePanel() {
     } catch (err) {
       setError(err instanceof Error ? err.message : "Could not update task");
     }
+  }
+
+  async function saveCheckpoint(event: FormEvent, task: Task) {
+    event.preventDefault();
+    if (!checkpointSummary.trim()) return;
+    setSaving(true);
+    setError("");
+    try {
+      await api("/api/v1/workspace/checkpoints", {
+        method: "POST",
+        body: JSON.stringify({
+          project_id: task.project_id || null,
+          task_id: task.id,
+          summary: checkpointSummary.trim(),
+          completed_work: checkpointCompleted.trim(),
+          next_action: checkpointNext.trim(),
+          blockers: checkpointBlockers.trim(),
+        }),
+      });
+      setCheckpointTaskId(null);
+      setCheckpointSummary(""); setCheckpointCompleted(""); setCheckpointNext(""); setCheckpointBlockers("");
+      await load();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Could not save checkpoint");
+    } finally { setSaving(false); }
   }
 
   const activeTasks = tasks.filter((task) => !["done", "cancelled"].includes(task.status));
@@ -238,6 +269,32 @@ export default function WorkspacePanel() {
                 <button onClick={() => updateTask(task, "done")} className="rounded-lg bg-emerald-700 px-2.5 py-1.5 text-xs font-medium">Complete</button>
               </div>
             </div>
+            <button onClick={() => { setCheckpointTaskId(checkpointTaskId === task.id ? null : task.id); setCheckpointSummary(""); }} className="text-xs text-sky-400 underline">Save progress checkpoint</button>
+            {checkpointTaskId === task.id && (
+              <form onSubmit={(event) => saveCheckpoint(event, task)} className="space-y-2 rounded-xl border border-gray-700 bg-gray-950 p-3">
+                <input value={checkpointSummary} onChange={(e) => setCheckpointSummary(e.target.value)} required minLength={3} maxLength={2000} placeholder="What has been verified so far?" className="w-full rounded-lg border border-gray-700 bg-gray-900 px-3 py-2 text-sm" />
+                <textarea value={checkpointCompleted} onChange={(e) => setCheckpointCompleted(e.target.value)} rows={2} placeholder="Completed work" className="w-full rounded-lg border border-gray-700 bg-gray-900 px-3 py-2 text-sm" />
+                <textarea value={checkpointNext} onChange={(e) => setCheckpointNext(e.target.value)} rows={2} placeholder="Next action to resume" className="w-full rounded-lg border border-gray-700 bg-gray-900 px-3 py-2 text-sm" />
+                <textarea value={checkpointBlockers} onChange={(e) => setCheckpointBlockers(e.target.value)} rows={2} placeholder="Blockers or unknowns (optional)" className="w-full rounded-lg border border-gray-700 bg-gray-900 px-3 py-2 text-sm" />
+                <div className="flex gap-2">
+                  <button type="button" onClick={() => setCheckpointTaskId(null)} className="flex-1 rounded-lg border border-gray-700 py-2 text-xs">Cancel</button>
+                  <button disabled={saving || !checkpointSummary.trim()} className="flex-1 rounded-lg bg-sky-600 py-2 text-xs font-medium disabled:opacity-40">{saving ? "Saving…" : "Save checkpoint"}</button>
+                </div>
+              </form>
+            )}
+          </article>
+        ))}
+      </section>
+
+      <section className="space-y-3">
+        <h2 className="font-semibold">Recent checkpoints</h2>
+        {!loading && (overview?.recent_checkpoints?.length ?? 0) === 0 && <p className="text-sm text-gray-500">No saved checkpoints yet. Record verified progress before switching tasks.</p>}
+        {overview?.recent_checkpoints?.map((checkpoint) => (
+          <article key={checkpoint.id} className="rounded-xl border border-gray-800 bg-gray-900 p-3 space-y-1">
+            <p className="text-sm font-medium">{checkpoint.summary}</p>
+            {checkpoint.next_action && <p className="text-xs text-gray-400">Next: {checkpoint.next_action}</p>}
+            {checkpoint.blockers && <p className="text-xs text-amber-300">Blocker: {checkpoint.blockers}</p>}
+            <p className="text-[10px] text-gray-600">{new Date(checkpoint.created_at).toLocaleString()}</p>
           </article>
         ))}
       </section>
