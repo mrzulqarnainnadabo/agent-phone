@@ -66,7 +66,8 @@ Repository inspection found:
 ### Stage 2 — Secure single-user access and action governance
 - [x] Replace browser-exposed shared API token with password login and short-lived HMAC-signed owner sessions; token is stored in sessionStorage, not in build-time configuration.
 - [x] Add SQLite-backed login-attempt tracking and rate-limit repeated failed password attempts.
-- [ ] Add session revocation and review the residual XSS/sessionStorage risk before enabling privileged tools.
+- [x] Add server-side session revocation on sign-out; revoked token hashes are stored server-side and checked on protected requests.
+- [ ] Complete XSS/sessionStorage review and enforce a stricter Content Security Policy before enabling privileged tools.
 - [x] Keep owner password, session signing secret, and provider credentials server-side only.
 - Add CSRF protection where cookie sessions are used, secure cookie flags, rate limits, and security headers.
 - Harden approval lifecycle: validate pending state, action type/level, actor, expiry, immutable payload hash, and single-use execution.
@@ -167,7 +168,7 @@ These are to be addressed in the order above; do not paper over them with UI-onl
 - No local shell execution was available through the GitHub repository connector; CI is the source of build/test verification.
 
 ### Remaining blockers before tool execution
-1. Complete session revocation, CSP, and XSS review before connecting privileged tools.
+1. Complete the CSP/XSS review, validate session revocation under realistic deployment conditions, and then begin read-only tool integration.
 2. Bind approvals to immutable action payloads, add expiry and audit semantics, and prevent replay.
 3. Add typed tool registry, per-tool permissions, and a server-side executor.
 4. Add provider usage/cost accounting and request budgets.
