@@ -148,3 +148,14 @@ def test_chat_uses_saved_operating_charter_and_project_context(client, monkeypat
     assert "ISEYC Observatory" in system_content
     assert "Verify source coverage" in system_content
     assert captured["model"] != "unapproved-model"
+
+    thread_id = response.json()["thread_id"]
+    history = client.get(f"/api/v1/threads/{thread_id}/messages", headers=headers())
+    assert history.status_code == 200
+    assert [item["role"] for item in history.json()] == ["user", "assistant"]
+    assert history.json()[0]["content"] == "Continue with the Observatory work"
+
+
+def test_unknown_conversation_history_returns_404(client):
+    response = client.get("/api/v1/threads/not-a-thread/messages", headers=headers())
+    assert response.status_code == 404
