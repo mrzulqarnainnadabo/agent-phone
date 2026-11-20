@@ -14,16 +14,17 @@ app = FastAPI(
     description="Phone-first control room for trusted AI workers",
     version="0.8.0",
 )
-_cors_origins = [o.strip() for o in os.getenv(
-    "CORS_ORIGINS",
-    "https://agent-phone.netlify.app,http://localhost:3000,http://127.0.0.1:3000"
-).split(",") if o.strip()]
+APP_ENV = os.getenv("APP_ENV", "development").lower()
+_cors_origins = [o.strip() for o in os.getenv("CORS_ORIGINS", "").split(",") if o.strip()]
+if APP_ENV == "production" and not _cors_origins:
+    raise RuntimeError("CORS_ORIGINS must explicitly list the trusted frontend origin in production")
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=_cors_origins or ["*"],
-    allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
+    allow_origins=_cors_origins or ["http://localhost:3000", "http://127.0.0.1:3000"],
+    allow_credentials=False,
+    allow_methods=["GET", "POST", "PATCH", "PUT", "DELETE", "OPTIONS"],
+    allow_headers=["Authorization", "Content-Type"],
+    max_age=600,
 )
 
 @app.middleware("http")
