@@ -207,6 +207,21 @@ def register_core_more(app: FastAPI) -> None:
             await db.close()
         return ChatResponse(thread_id=thread_id, reply=reply, message_id=message_id, model=model)
 
+    @app.get("/api/v1/threads/{thread_id}/messages")
+    async def list_thread_messages(thread_id: str, limit: int = Query(100, ge=1, le=200), _auth=Depends(require_auth)):
+        db = await get_db()
+        try:
+            thread = await (await db.execute("SELECT id FROM threads WHERE id=?", (thread_id,))).fetchone()
+            if not thread:
+                raise HTTPException(404, "Conversation not found")
+            cur = await db.execute(
+                "SELECT id, role, content, created_at FROM messages WHERE thread_id=? ORDER BY rowid DESC LIMIT ?",
+                (thread_id, limit),
+            )
+            return [dict(row) for row in reversed(await cur.fetchall())]
+        finally:
+            await db.close()
+
     @app.get("/api/v1/threads")
     async def list_threads(_auth=Depends(require_auth)):
         db = await get_db()
