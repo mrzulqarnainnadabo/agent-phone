@@ -38,7 +38,12 @@ async def create_pending_approval(
         "proposed_output": proposed_output,
         "reason": reason,
     }
-    canonical_payload = json.dumps(payload, sort_keys=True, separators=(",", ":"), ensure_ascii=False)
+    try:
+        canonical_payload = json.dumps(payload, sort_keys=True, separators=(",", ":"), ensure_ascii=False)
+    except (TypeError, ValueError) as exc:
+        raise HTTPException(400, "Action payload must contain JSON-compatible values") from exc
+    if len(canonical_payload) > 12000:
+        raise HTTPException(413, "Action payload is too large to approve")
     payload_hash = hashlib.sha256(canonical_payload.encode("utf-8")).hexdigest()
     expires_at = (datetime.utcnow() + timedelta(seconds=max(60, min(ttl_seconds, 604800)))).isoformat()
     await db.execute(
