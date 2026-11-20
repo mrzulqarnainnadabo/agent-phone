@@ -6,6 +6,8 @@ import pytest
 from app import core_helpers
 from app.core_routes import register_core
 from app.core_routes_more import register_core_more
+from app.auth import router as auth_router
+import app.auth as auth_module
 
 
 @pytest.fixture()
@@ -13,9 +15,12 @@ def client(tmp_path, monkeypatch):
     monkeypatch.setattr(core_helpers, "DB_PATH", tmp_path / "agent-phone-test.sqlite3")
     monkeypatch.setattr(core_helpers, "APP_LOGIN_PASSWORD", "test-owner-password")
     monkeypatch.setattr(core_helpers, "SESSION_SECRET", "test-session-secret-at-least-32-characters")
+    monkeypatch.setattr(auth_module, "APP_LOGIN_PASSWORD", "test-owner-password")
+    monkeypatch.setattr(auth_module, "SESSION_SECRET", "test-session-secret-at-least-32-characters")
     app = FastAPI()
     register_core(app)
     register_core_more(app)
+    app.include_router(auth_router)
     with TestClient(app) as test_client:
         yield test_client
 
