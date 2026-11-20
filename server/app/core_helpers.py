@@ -5,7 +5,7 @@ from typing import Optional, List, Literal
 from fastapi import HTTPException, Depends, Header, Query
 from pydantic import BaseModel, Field
 import os, uuid, json, aiosqlite, httpx, hmac, hashlib, base64, time, binascii
-from datetime import datetime
+from datetime import datetime, timezone
 from pathlib import Path
 
 DATA_DIR = Path(os.getenv("DATA_DIR", "./data")); DATA_DIR.mkdir(parents=True, exist_ok=True)
@@ -97,7 +97,7 @@ async def get_db():
     await db.execute("PRAGMA foreign_keys = ON")
     return db
 
-def now_iso(): return datetime.utcnow().isoformat()
+def now_iso(): return datetime.now(timezone.utc).isoformat()
 
 async def log_event(db, goal_id, event_type, actor_type="system", actor_id=None, payload=None):
     await db.execute("INSERT INTO goal_events (id, goal_id, actor_type, actor_id, event_type, payload, created_at) VALUES (?,?,?,?,?,?,?)",
@@ -158,7 +158,7 @@ async def init_db():
             }
             canonical = json.dumps(payload, sort_keys=True, separators=(",", ":"), ensure_ascii=False)
             digest = hashlib.sha256(canonical.encode("utf-8")).hexdigest()
-            migration_time = datetime.utcnow().isoformat()
+            migration_time = datetime.now(timezone.utc).isoformat()
             if row["status"] == "pending":
                 await db.execute(
                     "UPDATE approvals SET action_payload_json=?, payload_hash=?, expires_at=?, status='expired', decided_at=?, decision_note=? WHERE id=?",
@@ -173,7 +173,7 @@ async def init_db():
         await db.commit()
         cur = await db.execute("SELECT COUNT(*) as c FROM agents")
         if (await cur.fetchone())["c"] == 0:
-            aid = f"agent-{uuid.uuid4().hex[:8]}"; now = datetime.utcnow().isoformat()
+            aid = f"agent-{uuid.uuid4().hex[:8]}"; now = datetime.now(timezone.utc).isoformat()
             await db.execute("INSERT INTO agents (id,name,handle,purpose,personality,system_instructions,status,approval_mode,created_at,updated_at) VALUES (?,?,?,?,?,?,?,?,?,?)",
                 (aid,"Atlas","atlas","Research and organize project information","Concise, analytical, practical","You are Atlas, a research agent.","active","ask_consequential",now,now))
             await db.execute("INSERT INTO approval_policies (id,agent_id,default_action,consequential_action,external_communication,destructive_action,financial_action) VALUES (?,?,?,?,?,?,?)",
