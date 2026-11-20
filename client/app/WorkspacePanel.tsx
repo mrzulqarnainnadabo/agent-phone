@@ -82,6 +82,8 @@ export default function WorkspacePanel() {
         api("/api/v1/workspace/tasks?limit=50"),
         api("/api/v1/workspace/overview"),
         api("/api/v1/workspace/settings"),
+        api("/api/v1/github/status"),
+        api("/api/v1/tools/audit?limit=10"),
       ]);
       setProjects(projectList);
       setTasks(taskList);
