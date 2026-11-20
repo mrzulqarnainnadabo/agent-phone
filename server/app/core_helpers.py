@@ -4,7 +4,7 @@ from __future__ import annotations
 from typing import Optional, List
 from fastapi import HTTPException, Depends, Header, Query
 from pydantic import BaseModel, Field
-import os, uuid, json, aiosqlite, httpx, hmac, hashlib, base64, time
+import os, uuid, json, aiosqlite, httpx, hmac, hashlib, base64, time, binascii
 from datetime import datetime
 from pathlib import Path
 
@@ -59,7 +59,7 @@ def verify_session_token(token: str) -> bool:
         padded = payload + "=" * (-len(payload) % 4)
         data = json.loads(base64.urlsafe_b64decode(padded.encode("ascii")))
         return data.get("sub") == "owner" and int(data.get("exp", 0)) > int(time.time())
-    except (ValueError, TypeError, json.JSONDecodeError):
+    except (ValueError, TypeError, json.JSONDecodeError, binascii.Error):
         return False
 
 
