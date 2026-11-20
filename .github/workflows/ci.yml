@@ -35,7 +35,8 @@ jobs:
         run: pip install -r requirements.txt
       - name: Run tests
         env:
-          APP_AUTH_TOKEN: ci-test-token
+          APP_LOGIN_PASSWORD: ci-test-owner-password
+          SESSION_SECRET: ci-session-secret-with-at-least-thirty-two-characters
           DATA_DIR: ${{ runner.temp }}/agent-phone-ci-data
           CRYPTO_PROVIDER: fixture
         run: pytest -q
@@ -58,5 +59,4 @@ jobs:
       - name: Build
         env:
           NEXT_PUBLIC_API_URL: https://example.invalid
-          NEXT_PUBLIC_APP_AUTH_TOKEN: ci-placeholder-not-a-secret
         run: npm run build
