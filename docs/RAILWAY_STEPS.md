@@ -25,9 +25,13 @@ Optional AI variables:
 MODEL_API_KEY=<provider API key>
 MODEL_API_BASE_URL=https://api.openai.com/v1
 DEFAULT_MODEL=gpt-4o-mini
+
+# Optional read-only GitHub inspection. Restrict token scopes and repository access.
+GITHUB_TOKEN=<fine-grained-token-with-read-only-scopes>
+GITHUB_ALLOWED_REPOS=mrzulqarnainnadabo/agent-phone
 ```
 
-Keep all credentials server-side. Never expose the owner password, session secret, or model API key to the frontend.
+Keep all credentials server-side. Never expose the owner password, session secret, GitHub token, or model API key to the frontend. The GitHub integration is strictly read-only and checks an exact server-side repository allowlist.
 
 Keep the persistent volume mounted at `/data`. Verify `/health` and `/ready` after an approved deployment.
 
