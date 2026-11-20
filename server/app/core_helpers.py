@@ -129,6 +129,47 @@ async def init_db():
             CREATE INDEX IF NOT EXISTS idx_handoffs_goal_status ON handoffs(goal_id, status);
             CREATE INDEX IF NOT EXISTS idx_events_goal_created ON goal_events(goal_id, created_at DESC);
         """)
+        approval_columns = await (await db.execute("PRAGMA table_info(approvals)")).fetchall()
+        existing_columns = {row["name"] for row in approval_columns}
+        for column, column_type in (
+            ("action_payload_json", "TEXT"),
+            ("payload_hash", "TEXT"),
+            ("expires_at", "TEXT"),
+            ("executed_at", "TEXT"),
+            ("execution_result_json", "TEXT"),
+        ):
+            if column not in existing_columns:
+                await db.execute(f"ALTER TABLE approvals ADD COLUMN {column} {column_type}")
+
+        legacy_cur = await db.execute(
+            "SELECT id, goal_id, action_type, action_level, title, description, proposed_input, proposed_output, reason, status "
+            "FROM approvals WHERE payload_hash IS NULL"
+        )
+        for row in await legacy_cur.fetchall():
+            payload = {
+                "goal_id": row["goal_id"],
+                "action_type": row["action_type"],
+                "action_level": row["action_level"],
+                "title": row["title"],
+                "description": row["description"],
+                "proposed_input": row["proposed_input"],
+                "proposed_output": row["proposed_output"],
+                "reason": row["reason"],
+            }
+            canonical = json.dumps(payload, sort_keys=True, separators=(",", ":"), ensure_ascii=False)
+            digest = hashlib.sha256(canonical.encode("utf-8")).hexdigest()
+            migration_time = datetime.utcnow().isoformat()
+            if row["status"] == "pending":
+                await db.execute(
+                    "UPDATE approvals SET action_payload_json=?, payload_hash=?, expires_at=?, status='expired', decided_at=?, decision_note=? WHERE id=?",
+                    (canonical, digest, migration_time, migration_time,
+                     "Expired during secure approval migration; create a new proposal.", row["id"]),
+                )
+            else:
+                await db.execute(
+                    "UPDATE approvals SET action_payload_json=?, payload_hash=?, expires_at=? WHERE id=?",
+                    (canonical, digest, migration_time, row["id"]),
+                )
         await db.commit()
         cur = await db.execute("SELECT COUNT(*) as c FROM agents")
         if (await cur.fetchone())["c"] == 0:
