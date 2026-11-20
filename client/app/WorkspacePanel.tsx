@@ -14,6 +14,7 @@ type Task = {
   status: "todo" | "in_progress" | "blocked" | "done" | "cancelled";
   priority: string; due_date?: string | null;
 };
+type ToolAudit = { id: string; thread_id: string; tool_name: string; arguments_json: string; outcome: string; created_at: string };
 type Overview = {
   active_projects: number;
   tasks: Record<string, number>;
@@ -70,12 +71,13 @@ export default function WorkspacePanel() {
   const [githubRuns, setGithubRuns] = useState<any[]>([]);
   const [githubLoading, setGithubLoading] = useState(false);
   const [githubError, setGithubError] = useState("");
+  const [toolAudit, setToolAudit] = useState<ToolAudit[]>([]);
 
   async function load() {
     setLoading(true);
     setError("");
     try {
-      const [projectList, taskList, summary, settings, githubStatus] = await Promise.all([
+      const [projectList, taskList, summary, settings, githubStatus, audit] = await Promise.all([
         api("/api/v1/workspace/projects"),
         api("/api/v1/workspace/tasks?limit=50"),
         api("/api/v1/workspace/overview"),
@@ -87,6 +89,7 @@ export default function WorkspacePanel() {
       setOperatingCharter(settings.operating_charter?.value || "");
       setAutonomyMode(settings.autonomy_mode?.value || "hybrid");
       setGithubConfigured(Boolean(githubStatus.configured));
+      setToolAudit(audit);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Could not load workspace");
     } finally {
@@ -409,6 +412,24 @@ export default function WorkspacePanel() {
             </div>
           </div>
         )}
+      </section>
+
+      <section className="space-y-3">
+        <div>
+          <h2 className="font-semibold">Tool activity</h2>
+          <p className="mt-1 text-xs text-gray-500">Auditable history of read-only tool calls made by the assistant.</p>
+        </div>
+        {toolAudit.length === 0 && <p className="rounded-xl border border-dashed border-gray-800 p-3 text-xs text-gray-500">No tool calls have been recorded.</p>}
+        {toolAudit.map((item) => (
+          <article key={item.id} className="flex items-start justify-between gap-3 rounded-xl border border-gray-800 bg-gray-900 p-3">
+            <div className="min-w-0">
+              <p className="text-xs font-medium">{item.tool_name}</p>
+              <p className="mt-1 truncate text-[10px] text-gray-500">{item.arguments_json}</p>
+              <p className="mt-1 text-[10px] text-gray-600">{new Date(item.created_at).toLocaleString()}</p>
+            </div>
+            <span className={item.outcome === "success" ? "text-[10px] text-emerald-400" : "text-[10px] text-amber-300"}>{item.outcome}</span>
+          </article>
+        ))}
       </section>
     </div>
   );
