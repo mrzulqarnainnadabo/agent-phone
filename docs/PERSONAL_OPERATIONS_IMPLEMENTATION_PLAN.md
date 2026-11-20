@@ -82,7 +82,9 @@ Repository inspection found:
 - Add cost/usage accounting, request budgets, timeouts, token caps, and graceful failure handling.
 - Add a central orchestrator with a small number of role profiles: Research, Engineering, Operations, Learning, Communications, and QA. These are instruction/tool profiles, not separate paid model subscriptions.
 - Add a typed tool registry with JSON schemas, capability checks, allowlists, execution limits, idempotency keys, and structured results.
-- Start with read-only GitHub inspection and project/task operations.
+- [x] Add read-only GitHub inspection endpoints (repository metadata, pull requests, workflow runs, trees, and text files), protected by server-side token and exact repository allowlist.
+- [x] Add a mobile repository inspector in the Work tab. No GitHub write scopes or write endpoints are implemented.
+- Add model-driven tool calling over the read-only registry and project/task operations.
 - Add draft-only code change preparation; create branches/PRs only after capability and approval policy allows it.
 - Add resumable execution jobs and progress updates.
 - Model may propose a tool call; the server authorises and executes it. Never trust model claims as evidence.
@@ -172,7 +174,7 @@ These are to be addressed in the order above; do not paper over them with UI-onl
 2. Bind approvals to immutable action payloads, add expiry and audit semantics, and prevent replay.
 3. Add typed tool registry, per-tool permissions, and a server-side executor.
 4. Add provider usage/cost accounting and request budgets.
-5. Add GitHub read-only tool integration and test it without granting write scopes.
+5. Add model-driven GitHub read-only tool calling; the API/UI inspector is present and mock-tested, but no model tool orchestration is connected yet.
 6. Complete frontend and deployment configuration review.
 
 **Next action:** Verify the latest CI run; then finish Stage 1 acceptance (including settings/checkpoint UX and docs) and begin the secure session/authentication design.
