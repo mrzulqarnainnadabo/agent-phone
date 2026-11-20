@@ -235,3 +235,24 @@ def test_cors_allows_local_frontend_but_not_arbitrary_origins(client):
         },
     )
     assert denied.headers.get("access-control-allow-origin") is None
+
+
+
+def test_daily_model_call_budget_is_enforced_and_visible(client, monkeypatch):
+    monkeypatch.setattr(core_helpers, "MODEL_DAILY_CALL_LIMIT", 1)
+    monkeypatch.setattr(core_routes_more, "MODEL_DAILY_CALL_LIMIT", 1)
+
+    async def fake_model(messages, model):
+        return "A bounded test response."
+
+    monkeypatch.setattr(core_routes_more, "call_model", fake_model)
+    first = client.post("/api/v1/chat", headers=headers(), json={"message": "First request"})
+    assert first.status_code == 200
+
+    second = client.post("/api/v1/chat", headers=headers(), json={"message": "Second request"})
+    assert second.status_code == 429
+
+    usage = client.get("/api/v1/usage", headers=headers())
+    assert usage.status_code == 200
+    assert usage.json()["calls_today"] == 1
+    assert usage.json()["remaining"] == 0
