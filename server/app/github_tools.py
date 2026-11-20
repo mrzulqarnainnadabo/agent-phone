@@ -68,6 +68,114 @@ async def _get(owner: str, repo: str, endpoint: str, params: Optional[dict] = No
         raise HTTPException(502, "GitHub returned an invalid response") from exc
 
 
+def tool_definitions():
+    """OpenAI-compatible function schemas; every function is read-only."""
+    return [
+        {"type": "function", "function": {
+            "name": "github_get_repository",
+            "description": "Read metadata for an allowlisted GitHub repository.",
+            "parameters": {"type": "object", "properties": {
+                "owner": {"type": "string"}, "repo": {"type": "string"}
+            }, "required": ["owner", "repo"], "additionalProperties": False},
+        }},
+        {"type": "function", "function": {
+            "name": "github_list_pull_requests",
+            "description": "List recent pull requests for an allowlisted GitHub repository.",
+            "parameters": {"type": "object", "properties": {
+                "owner": {"type": "string"}, "repo": {"type": "string"},
+                "state": {"type": "string", "enum": ["open", "closed", "all"]},
+                "limit": {"type": "integer", "minimum": 1, "maximum": 20},
+            }, "required": ["owner", "repo"], "additionalProperties": False},
+        }},
+        {"type": "function", "function": {
+            "name": "github_list_workflow_runs",
+            "description": "Read recent GitHub Actions workflow runs for an allowlisted repository.",
+            "parameters": {"type": "object", "properties": {
+                "owner": {"type": "string"}, "repo": {"type": "string"},
+                "branch": {"type": "string"}, "limit": {"type": "integer", "minimum": 1, "maximum": 20},
+            }, "required": ["owner", "repo"], "additionalProperties": False},
+        }},
+        {"type": "function", "function": {
+            "name": "github_get_repository_tree",
+            "description": "Read the file tree for an allowlisted repository and ref.",
+            "parameters": {"type": "object", "properties": {
+                "owner": {"type": "string"}, "repo": {"type": "string"}, "ref": {"type": "string"},
+            }, "required": ["owner", "repo"], "additionalProperties": False},
+        }},
+        {"type": "function", "function": {
+            "name": "github_get_repository_file",
+            "description": "Read a UTF-8 text file from an allowlisted repository.",
+            "parameters": {"type": "object", "properties": {
+                "owner": {"type": "string"}, "repo": {"type": "string"},
+                "path": {"type": "string"}, "ref": {"type": "string"},
+            }, "required": ["owner", "repo", "path"], "additionalProperties": False},
+        }},
+    ]
+
+
+async def execute_readonly_tool(name: str, arguments: dict):
+    """Validate and execute only the five registered read-only GitHub tools."""
+    if not isinstance(arguments, dict):
+        raise HTTPException(400, "Tool arguments must be an object")
+    owner, repo = arguments.get("owner"), arguments.get("repo")
+    if not isinstance(owner, str) or not isinstance(repo, str):
+        raise HTTPException(400, "GitHub tool requires owner and repo")
+    if name == "github_get_repository":
+        data = await _get(owner, repo, "")
+        return {key: data.get(key) for key in (
+            "name", "full_name", "description", "default_branch", "private",
+            "updated_at", "html_url", "language", "open_issues_count",
+        )}
+    if name == "github_list_pull_requests":
+        state = arguments.get("state", "open")
+        limit = arguments.get("limit", 10)
+        if state not in {"open", "closed", "all"} or not isinstance(limit, int) or not 1 <= limit <= 20:
+            raise HTTPException(400, "Invalid pull request tool arguments")
+        data = await _get(owner, repo, "pulls", {"state": state, "per_page": limit, "sort": "updated", "direction": "desc"})
+        return [{"number": item.get("number"), "title": item.get("title"), "state": item.get("state"),
+                 "draft": item.get("draft"), "html_url": item.get("html_url"),
+                 "updated_at": item.get("updated_at"), "head": (item.get("head") or {}).get("ref"),
+                 "base": (item.get("base") or {}).get("ref")} for item in data]
+    if name == "github_list_workflow_runs":
+        limit = arguments.get("limit", 10)
+        branch = arguments.get("branch")
+        if not isinstance(limit, int) or not 1 <= limit <= 20 or (branch is not None and not isinstance(branch, str)):
+            raise HTTPException(400, "Invalid workflow run tool arguments")
+        params = {"per_page": limit}
+        if branch:
+            params["branch"] = branch
+        data = await _get(owner, repo, "actions/runs", params)
+        return [{"id": item.get("id"), "name": item.get("name"), "display_title": item.get("display_title"),
+                 "status": item.get("status"), "conclusion": item.get("conclusion"),
+                 "head_branch": item.get("head_branch"), "html_url": item.get("html_url"),
+                 "created_at": item.get("created_at")} for item in data.get("workflow_runs", [])]
+    if name == "github_get_repository_tree":
+        ref = arguments.get("ref", "main")
+        if not isinstance(ref, str) or not ref or ".." in ref:
+            raise HTTPException(400, "Invalid Git reference")
+        data = await _get(owner, repo, f"git/trees/{quote(ref, safe='')}", {"recursive": "1"})
+        return {"sha": data.get("sha"), "truncated": data.get("truncated", False),
+                "entries": [{"path": item.get("path"), "type": item.get("type"), "size": item.get("size")}
+                            for item in data.get("tree", [])[:1000]]}
+    if name == "github_get_repository_file":
+        path, ref = arguments.get("path"), arguments.get("ref", "main")
+        if not isinstance(path, str) or not path or path.startswith("/") or ".." in path.split("/"):
+            raise HTTPException(400, "Invalid repository file path")
+        if not isinstance(ref, str) or not ref or ".." in ref:
+            raise HTTPException(400, "Invalid Git reference")
+        data = await _get(owner, repo, f"contents/{quote(path, safe='/')}", {"ref": ref})
+        if data.get("type") != "file" or data.get("encoding") != "base64":
+            raise HTTPException(400, "Requested GitHub resource is not a text file")
+        try:
+            raw = base64.b64decode(data.get("content", ""), validate=False)
+            if len(raw) > 100_000:
+                raise HTTPException(413, "File is too large for model context")
+            return {"path": data.get("path"), "sha": data.get("sha"), "content": raw.decode("utf-8")}
+        except UnicodeDecodeError as exc:
+            raise HTTPException(415, "File is not UTF-8 text") from exc
+    raise HTTPException(400, "Tool is not registered or is not read-only")
+
+
 @router.get("/status")
 async def github_status(_auth=Depends(require_auth)):
     token, allowed = _configuration()
