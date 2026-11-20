@@ -1,5 +1,6 @@
 """Regression tests for Agent Phone's core API and approval state machine."""
-from fastapi import FastAPI
+import asyncio
+from fastapi import FastAPI, HTTPException
 from fastapi.testclient import TestClient
 import pytest
 
@@ -7,6 +8,7 @@ from app import core_helpers
 from app.core_routes import register_core
 from app.core_routes_more import register_core_more
 from app.auth import router as auth_router
+from app.approval_create import consume_approved_action
 import app.auth as auth_module
 
 
@@ -66,6 +68,7 @@ def test_approval_decision_is_single_use(client):
     )
     assert approved.status_code == 200
     assert approved.json()["status"] == "approved"
+    assert approved.json()["execution_status"] == "not_executed"
 
     replay = client.post(
         f"/api/v1/approvals/{approval_id}/reject",
@@ -132,3 +135,100 @@ def test_owner_login_issues_a_valid_short_lived_session(client):
 def test_invalid_session_token_is_rejected(client):
     response = client.get("/api/v1/agents", headers={"Authorization": "Bearer not.a.valid.signature"})
     assert response.status_code == 401
+
+
+
+def test_approval_payload_tampering_cancels_proposal(client):
+    approval = client.post("/api/v1/approvals/demo", headers=auth()).json()
+
+    async def tamper():
+        db = await core_helpers.get_db()
+        try:
+            await db.execute(
+                "UPDATE approvals SET action_payload_json=? WHERE id=?",
+                ('{"body":"changed after approval request"}', approval["id"]),
+            )
+            await db.commit()
+        finally:
+            await db.close()
+
+    asyncio.run(tamper())
+    response = client.post(
+        f"/api/v1/approvals/{approval['id']}/approve",
+        headers=auth(),
+        json={"note": "Approve"},
+    )
+    assert response.status_code == 409
+
+    cancelled = client.get("/api/v1/approvals?status=cancelled", headers=auth())
+    assert any(item["id"] == approval["id"] for item in cancelled.json())
+
+
+def test_expired_approval_cannot_be_approved(client):
+    approval = client.post("/api/v1/approvals/demo", headers=auth()).json()
+
+    async def expire():
+        db = await core_helpers.get_db()
+        try:
+            await db.execute(
+                "UPDATE approvals SET expires_at=? WHERE id=?",
+                ("2000-01-01T00:00:00", approval["id"]),
+            )
+            await db.commit()
+        finally:
+            await db.close()
+
+    asyncio.run(expire())
+    response = client.post(
+        f"/api/v1/approvals/{approval['id']}/approve",
+        headers=auth(),
+        json={"note": "Too late"},
+    )
+    assert response.status_code == 409
+    expired = client.get("/api/v1/approvals?status=expired", headers=auth())
+    assert any(item["id"] == approval["id"] for item in expired.json())
+
+
+def test_approved_action_can_only_be_consumed_once(client):
+    approval = client.post("/api/v1/approvals/demo", headers=auth()).json()
+    decided = client.post(
+        f"/api/v1/approvals/{approval['id']}/approve",
+        headers=auth(),
+        json={"note": "Approved"},
+    )
+    assert decided.status_code == 200
+
+    async def consume():
+        db = await core_helpers.get_db()
+        try:
+            return await consume_approved_action(
+                db, approval_id=approval["id"], expected_payload_hash=approval["payload_hash"]
+            )
+        finally:
+            await db.close()
+
+    payload = asyncio.run(consume())
+    assert payload["channel"] == "email"
+    with pytest.raises(HTTPException) as exc:
+        asyncio.run(consume())
+    assert exc.value.status_code == 409
+
+
+def test_create_approval_endpoint_stores_bound_action_payload(client):
+    agent = client.get("/api/v1/agents", headers=auth()).json()[0]
+    response = client.post(
+        "/api/v1/approvals",
+        headers=auth(),
+        json={
+            "agent_id": agent["id"],
+            "title": "Create a pull request",
+            "description": "Prepare a proposed code change",
+            "action_type": "github.create_pull_request",
+            "action_level": "consequential",
+            "action_payload": {"repository": "mrzulqarnainnadabo/agent-phone", "base": "main", "head": "feature"},
+        },
+    )
+    assert response.status_code == 200
+    assert response.json()["payload_hash"]
+    assert response.json()["action_payload_json"]
+    assert response.json()["expires_at"]
