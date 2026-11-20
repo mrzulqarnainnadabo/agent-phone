@@ -6,6 +6,7 @@ from app.crypto.router import router as crypto_router
 from app.core_routes import register_core
 from app.core_routes_more import register_core_more
 from app.workspace import router as workspace_router
+from app.auth import router as auth_router
 
 app = FastAPI(
     title="Agent Phone API",
@@ -28,3 +29,4 @@ register_core(app)
 register_core_more(app)
 app.include_router(crypto_router)
 app.include_router(workspace_router)
+app.include_router(auth_router)
