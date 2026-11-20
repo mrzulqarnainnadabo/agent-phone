@@ -1,0 +1,62 @@
+name: Agent Phone CI
+
+on:
+  push:
+    branches:
+      - main
+      - "feat/**"
+      - "fix/**"
+  pull_request:
+    branches:
+      - main
+
+permissions:
+  contents: read
+
+concurrency:
+  group: agent-phone-ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  backend:
+    name: Backend tests
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: server
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: server/requirements.txt
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+      - name: Run tests
+        env:
+          APP_AUTH_TOKEN: ci-test-token
+          DATA_DIR: ${{ runner.temp }}/agent-phone-ci-data
+          CRYPTO_PROVIDER: fixture
+        run: pytest -q
+
+  frontend:
+    name: Frontend production build
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: client
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: npm
+          cache-dependency-path: client/package.json
+      - name: Install dependencies
+        run: npm install --no-audit --no-fund
+      - name: Build
+        env:
+          NEXT_PUBLIC_API_URL: https://example.invalid
+          NEXT_PUBLIC_APP_AUTH_TOKEN: ci-placeholder-not-a-secret
+        run: npm run build
