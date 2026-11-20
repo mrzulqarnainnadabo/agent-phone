@@ -1,4 +1,5 @@
 """Regression coverage for persistent personal workspace records."""
+import json
 from fastapi.testclient import TestClient
 import pytest
 
@@ -171,3 +172,42 @@ def test_api_sets_baseline_security_headers(client):
     assert response.headers["x-content-type-options"] == "nosniff"
     assert response.headers["x-frame-options"] == "DENY"
     assert response.headers["referrer-policy"] == "strict-origin-when-cross-origin"
+
+
+
+def test_chat_can_call_bounded_read_only_github_tools(client, monkeypatch):
+    monkeypatch.setattr(core_routes_more, "github_configuration", lambda: ("server-token", {"mrzulqarnainnadabo/agent-phone"}))
+    monkeypatch.setattr(core_routes_more, "tool_definitions", lambda: [{"type": "function", "function": {"name": "github_get_repository"}}])
+    calls = {"count": 0}
+
+    async def fake_execute(name, arguments):
+        assert name == "github_get_repository"
+        assert arguments["repo"] == "agent-phone"
+        return {"full_name": "mrzulqarnainnadabo/agent-phone", "default_branch": "main"}
+
+    async def fake_model(messages, model, tools):
+        calls["count"] += 1
+        if calls["count"] == 1:
+            return {
+                "content": None,
+                "tool_calls": [{
+                    "id": "call-read-1",
+                    "type": "function",
+                    "function": {
+                        "name": "github_get_repository",
+                        "arguments": json.dumps({"owner": "mrzulqarnainnadabo", "repo": "agent-phone"}),
+                    },
+                }],
+            }
+        assert any(message.get("role") == "tool" for message in messages)
+        return {"content": "I inspected the repository using read-only GitHub access.", "tool_calls": []}
+
+    monkeypatch.setattr(core_routes_more, "execute_readonly_tool", fake_execute)
+    monkeypatch.setattr(core_routes_more, "call_model_with_tools", fake_model)
+
+    response = client.post("/api/v1/chat", headers=headers(), json={"message": "Inspect my Agent Phone repository"})
+    assert response.status_code == 200
+    assert "read-only GitHub access" in response.json()["reply"]
+    assert calls["count"] == 2
+
+    db = core_helpers.get_db
