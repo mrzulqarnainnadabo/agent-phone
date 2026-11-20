@@ -13,6 +13,14 @@ DB_PATH = DATA_DIR / "agent_phone.db"
 MODEL_API_KEY = os.getenv("MODEL_API_KEY", "")
 MODEL_API_BASE_URL = os.getenv("MODEL_API_BASE_URL", "https://api.openai.com/v1").rstrip("/")
 DEFAULT_MODEL = os.getenv("DEFAULT_MODEL", "gpt-4o-mini")
+try:
+    MODEL_MAX_TOKENS = max(128, min(2048, int(os.getenv("MODEL_MAX_TOKENS", "1024"))))
+except ValueError:
+    MODEL_MAX_TOKENS = 1024
+try:
+    MODEL_DAILY_CALL_LIMIT = max(1, min(500, int(os.getenv("MODEL_DAILY_CALL_LIMIT", "60"))))
+except ValueError:
+    MODEL_DAILY_CALL_LIMIT = 60
 APP_LOGIN_PASSWORD = os.getenv("APP_LOGIN_PASSWORD", "")
 SESSION_SECRET = os.getenv("SESSION_SECRET", "")
 try:
@@ -112,6 +120,8 @@ async def init_db():
             CREATE INDEX IF NOT EXISTS idx_revoked_sessions_expiry ON revoked_sessions(expires_at);
             CREATE TABLE IF NOT EXISTS tool_audit (id TEXT PRIMARY KEY, thread_id TEXT, tool_name TEXT NOT NULL, arguments_json TEXT NOT NULL, outcome TEXT NOT NULL, created_at TEXT NOT NULL);
             CREATE INDEX IF NOT EXISTS idx_tool_audit_thread_created ON tool_audit(thread_id, created_at DESC);
+            CREATE TABLE IF NOT EXISTS model_call_usage (id TEXT PRIMARY KEY, thread_id TEXT, model TEXT NOT NULL, status TEXT NOT NULL, created_at TEXT NOT NULL);
+            CREATE INDEX IF NOT EXISTS idx_model_call_usage_created ON model_call_usage(created_at DESC);
             CREATE TABLE IF NOT EXISTS messages (id TEXT PRIMARY KEY, thread_id TEXT, role TEXT, content TEXT, created_at TEXT, FOREIGN KEY (thread_id) REFERENCES threads(id));
             CREATE TABLE IF NOT EXISTS agents (id TEXT PRIMARY KEY, name TEXT NOT NULL, handle TEXT NOT NULL UNIQUE, purpose TEXT NOT NULL, personality TEXT, system_instructions TEXT, status TEXT NOT NULL DEFAULT 'active' CHECK (status IN ('active','paused','archived')), approval_mode TEXT NOT NULL DEFAULT 'ask_consequential' CHECK (approval_mode IN ('always_ask','ask_consequential','draft_only')), created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP, updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP);
             CREATE TABLE IF NOT EXISTS agent_permissions (id TEXT PRIMARY KEY, agent_id TEXT NOT NULL, capability TEXT NOT NULL, level TEXT NOT NULL CHECK (level IN ('read','draft','consequential')), created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP, UNIQUE(agent_id, capability), FOREIGN KEY(agent_id) REFERENCES agents(id) ON DELETE CASCADE);
@@ -221,6 +231,27 @@ class HandoffCreate(BaseModel):
 class HandoffNote(BaseModel):
     note: Optional[str]=None
 
+async def reserve_model_call(db, thread_id: str, model: str) -> str:
+    now = datetime.now(timezone.utc)
+    day_start = now.replace(hour=0, minute=0, second=0, microsecond=0).isoformat()
+    cur = await db.execute("SELECT COUNT(*) AS count FROM model_call_usage WHERE created_at>=?", (day_start,))
+    count = (await cur.fetchone())["count"]
+    if count >= MODEL_DAILY_CALL_LIMIT:
+        raise HTTPException(429, "Daily AI call limit reached; increase MODEL_DAILY_CALL_LIMIT deliberately or try again tomorrow")
+    call_id = f"mdl-{uuid.uuid4().hex[:12]}"
+    await db.execute(
+        "INSERT INTO model_call_usage (id,thread_id,model,status,created_at) VALUES (?,?,?,?,?)",
+        (call_id, thread_id, model, "reserved", now.isoformat()),
+    )
+    await db.commit()
+    return call_id
+
+
+async def complete_model_call(db, call_id: str, status: str) -> None:
+    await db.execute("UPDATE model_call_usage SET status=? WHERE id=?", (status, call_id))
+    await db.commit()
+
+
 async def call_model(messages, model):
     if not MODEL_API_KEY:
         raise HTTPException(503, "AI model provider is not configured")
@@ -232,7 +263,7 @@ async def call_model(messages, model):
                     "Authorization": f"Bearer {MODEL_API_KEY}",
                     "Content-Type": "application/json",
                 },
-                json={"model": model, "messages": messages, "temperature": 0.4, "max_tokens": 1024},
+                json={"model": model, "messages": messages, "temperature": 0.4, "max_tokens": MODEL_MAX_TOKENS},
             )
             response.raise_for_status()
             payload = response.json()
