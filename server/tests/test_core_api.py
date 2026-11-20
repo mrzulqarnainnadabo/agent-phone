@@ -207,6 +207,19 @@ def test_approved_action_can_only_be_consumed_once(client):
         finally:
             await db.close()
 
+    async def consume_wrong_hash():
+        db = await core_helpers.get_db()
+        try:
+            return await consume_approved_action(
+                db, approval_id=approval["id"], expected_payload_hash="0" * 64
+            )
+        finally:
+            await db.close()
+
+    with pytest.raises(HTTPException) as wrong_hash:
+        asyncio.run(consume_wrong_hash())
+    assert wrong_hash.value.status_code == 409
+
     payload = asyncio.run(consume())
     assert payload["channel"] == "email"
     with pytest.raises(HTTPException) as exc:
