@@ -213,3 +213,25 @@ def test_chat_can_call_bounded_read_only_github_tools(client, monkeypatch):
     assert audit.status_code == 200
     assert audit.json()[0]["tool_name"] == "github_get_repository"
     assert audit.json()[0]["outcome"] == "success"
+
+
+def test_cors_allows_local_frontend_but_not_arbitrary_origins(client):
+    allowed = client.options(
+        "/api/v1/auth/login",
+        headers={
+            "Origin": "http://localhost:3000",
+            "Access-Control-Request-Method": "POST",
+            "Access-Control-Request-Headers": "content-type",
+        },
+    )
+    assert allowed.headers.get("access-control-allow-origin") == "http://localhost:3000"
+
+    denied = client.options(
+        "/api/v1/auth/login",
+        headers={
+            "Origin": "https://untrusted.example",
+            "Access-Control-Request-Method": "POST",
+            "Access-Control-Request-Headers": "content-type",
+        },
+    )
+    assert denied.headers.get("access-control-allow-origin") is None
