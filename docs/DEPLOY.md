@@ -15,8 +15,10 @@ Required backend environment variables:
 - `MODEL_API_BASE_URL`: defaults to `https://api.openai.com/v1`.
 - `DEFAULT_MODEL`: defaults to `gpt-4o-mini`.
 - `DATA_DIR`: persistent SQLite directory.
+- `GITHUB_TOKEN`: optional fine-grained GitHub token with read-only repository metadata, contents, pull requests, and Actions permissions.
+- `GITHUB_ALLOWED_REPOS`: comma-separated exact `owner/repository` allowlist. Leave empty to disable GitHub inspection.
 
-Never put `APP_LOGIN_PASSWORD`, `SESSION_SECRET`, or a model API key in a `NEXT_PUBLIC_*` variable or frontend build argument.
+Never put `APP_LOGIN_PASSWORD`, `SESSION_SECRET`, `GITHUB_TOKEN`, or a model API key in a `NEXT_PUBLIC_*` variable or frontend build argument. Give the GitHub token read-only scopes and restrict it to the exact repositories in the allowlist.
 
 Frontend environment:
 
