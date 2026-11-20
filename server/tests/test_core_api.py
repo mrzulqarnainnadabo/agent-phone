@@ -91,3 +91,10 @@ def test_chat_rejects_empty_and_oversized_messages(client):
     oversized = client.post("/api/v1/chat", headers=auth(), json={"message": "x" * 12001})
     assert empty.status_code == 422
     assert oversized.status_code == 422
+
+
+@pytest.mark.parametrize("placeholder", ["dev-token-change-me", "change-me-to-a-long-random-string"])
+def test_auth_rejects_known_placeholder_tokens(client, monkeypatch, placeholder):
+    monkeypatch.setattr(core_helpers, "APP_AUTH_TOKEN", placeholder)
+    response = client.get("/api/v1/agents", headers={"Authorization": f"Bearer {placeholder}"})
+    assert response.status_code == 503
