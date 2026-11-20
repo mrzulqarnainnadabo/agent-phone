@@ -74,3 +74,20 @@ def test_authentication_fails_closed_when_token_is_unconfigured(client, monkeypa
     response = client.get("/api/v1/agents", headers=auth())
     assert response.status_code == 503
     assert response.json()["detail"] == "Authentication is not configured"
+
+
+def test_chat_reports_missing_model_configuration_as_service_unavailable(client):
+    response = client.post(
+        "/api/v1/chat",
+        headers=auth(),
+        json={"message": "Hello", "system_prompt": "client-controlled prompt", "model": "arbitrary-model"},
+    )
+    assert response.status_code == 503
+    assert response.json()["detail"] == "AI model provider is not configured"
+
+
+def test_chat_rejects_empty_and_oversized_messages(client):
+    empty = client.post("/api/v1/chat", headers=auth(), json={"message": ""})
+    oversized = client.post("/api/v1/chat", headers=auth(), json={"message": "x" * 12001})
+    assert empty.status_code == 422
+    assert oversized.status_code == 422
