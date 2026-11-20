@@ -122,6 +122,39 @@ def register_core(app: FastAPI) -> None:
         finally:
             await db.close()
 
+    @app.post("/api/v1/approvals")
+    async def create_approval(body: ApprovalCreate, _auth=Depends(require_auth)):
+        db = await get_db()
+        try:
+            agent = await (await db.execute(
+                "SELECT id FROM agents WHERE id=? AND status='active'", (body.agent_id,)
+            )).fetchone()
+            if not agent:
+                raise HTTPException(404, "Active agent not found")
+            if body.goal_id:
+                goal = await (await db.execute(
+                    "SELECT id FROM goals WHERE id=? AND status='active'", (body.goal_id,)
+                )).fetchone()
+                if not goal:
+                    raise HTTPException(404, "Active goal not found")
+            approval = await create_pending_approval(
+                db,
+                agent_id=body.agent_id,
+                title=body.title,
+                description=body.description,
+                action_type=body.action_type,
+                action_level=body.action_level,
+                proposed_output=body.proposed_output,
+                proposed_input=body.proposed_input,
+                reason=body.reason,
+                goal_id=body.goal_id,
+                action_payload=body.action_payload,
+            )
+            await db.commit()
+            return approval
+        finally:
+            await db.close()
+
     @app.post("/api/v1/approvals/demo")
     async def create_demo_approval(_auth=Depends(require_auth)):
         db = await get_db()
