@@ -1,9 +1,9 @@
 "use client";
 
 import { FormEvent, useEffect, useState } from "react";
+import { expireSession, getSessionToken } from "./auth";
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
-const AUTH_TOKEN = process.env.NEXT_PUBLIC_APP_AUTH_TOKEN || "dev-token-change-me";
 
 type Project = {
   id: string; name: string; description: string; status: string; priority: string;
@@ -26,11 +26,12 @@ async function api(path: string, options: RequestInit = {}) {
     ...options,
     headers: {
       "Content-Type": "application/json",
-      Authorization: `Bearer ${AUTH_TOKEN}`,
+      Authorization: `Bearer ${getSessionToken()}`,
       ...(options.headers || {}),
     },
   });
   if (!response.ok) {
+    if (response.status === 401) expireSession();
     const error = await response.json().catch(() => ({}));
     throw new Error(error.detail || `Request failed (${response.status})`);
   }
