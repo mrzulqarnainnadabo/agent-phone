@@ -162,7 +162,7 @@ These are to be addressed in the order above; do not paper over them with UI-onl
 - New SQLite-backed workspace API: projects, tasks, checkpoints, decisions, settings, and overview.
 - Mobile Work tab for project/task capture, task status changes, operating preferences, and resumable checkpoints.
 - Chat system prompt now uses server-controlled operating charter, current projects, active tasks, and recent checkpoints.
-- Chat model selection is server-controlled; chat history is bounded to the most recent 20 messages.
+- Chat model selection is server-controlled; chat history is bounded to the most recent 20 messages and 20,000 characters.
 - Missing model configuration and provider failures return structured HTTP errors rather than placeholder replies.
 - Frontend Dockerfile no longer assumes Next.js standalone output.
 
