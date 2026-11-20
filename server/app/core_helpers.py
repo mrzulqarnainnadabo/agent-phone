@@ -4,7 +4,7 @@ from __future__ import annotations
 from typing import Optional, List
 from fastapi import HTTPException, Depends, Header, Query
 from pydantic import BaseModel
-import os, uuid, json, aiosqlite, httpx
+import os, uuid, json, aiosqlite, httpx, hmac
 from datetime import datetime
 from pathlib import Path
 
@@ -17,10 +17,12 @@ APP_AUTH_TOKEN = os.getenv("APP_AUTH_TOKEN", "dev-token-change-me")
 MAX_GOAL_AGENTS = 3
 
 async def require_auth(authorization: Optional[str] = Header(None)):
-    if not APP_AUTH_TOKEN: return True
+    if not APP_AUTH_TOKEN:
+        raise HTTPException(503, "Authentication is not configured")
     if not authorization or not authorization.startswith("Bearer "):
         raise HTTPException(401, "Missing or invalid Authorization header")
-    if authorization[7:].strip() != APP_AUTH_TOKEN:
+    supplied = authorization[7:].strip()
+    if not hmac.compare_digest(supplied, APP_AUTH_TOKEN):
         raise HTTPException(401, "Invalid token")
     return True
 
