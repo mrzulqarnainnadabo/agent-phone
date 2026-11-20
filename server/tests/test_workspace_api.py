@@ -209,3 +209,7 @@ def test_chat_can_call_bounded_read_only_github_tools(client, monkeypatch):
     assert response.status_code == 200
     assert "read-only GitHub access" in response.json()["reply"]
     assert calls["count"] == 2
+    audit = client.get("/api/v1/tools/audit", headers=headers())
+    assert audit.status_code == 200
+    assert audit.json()[0]["tool_name"] == "github_get_repository"
+    assert audit.json()[0]["outcome"] == "success"
