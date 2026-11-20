@@ -51,7 +51,7 @@ Built to sell to individuals and organizations — without Vercel/Supabase lock-
 git clone https://github.com/mrzulqarnainnadabo/agent-phone.git
 cd agent-phone
 cp .env.example .env
-# Set MODEL_API_KEY and APP_AUTH_TOKEN
+# Set APP_LOGIN_PASSWORD and SESSION_SECRET; add MODEL_API_KEY for real AI replies
 
 docker compose up --build
 ```
@@ -67,7 +67,8 @@ cd server
 python -m venv .venv && source .venv/bin/activate
 pip install -r requirements.txt
 export MODEL_API_KEY=sk-...
-export APP_AUTH_TOKEN=dev-token-change-me
+export APP_LOGIN_PASSWORD="your-long-owner-password"
+export SESSION_SECRET="$(openssl rand -hex 32)"
 python run.py
 ```
 
