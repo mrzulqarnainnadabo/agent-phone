@@ -59,19 +59,25 @@ export default function WorkspacePanel() {
   const [checkpointCompleted, setCheckpointCompleted] = useState("");
   const [checkpointNext, setCheckpointNext] = useState("");
   const [checkpointBlockers, setCheckpointBlockers] = useState("");
+  const [operatingCharter, setOperatingCharter] = useState("");
+  const [autonomyMode, setAutonomyMode] = useState("hybrid");
+  const [settingsSaving, setSettingsSaving] = useState(false);
 
   async function load() {
     setLoading(true);
     setError("");
     try {
-      const [projectList, taskList, summary] = await Promise.all([
+      const [projectList, taskList, summary, settings] = await Promise.all([
         api("/api/v1/workspace/projects"),
         api("/api/v1/workspace/tasks?limit=50"),
         api("/api/v1/workspace/overview"),
+        api("/api/v1/workspace/settings"),
       ]);
       setProjects(projectList);
       setTasks(taskList);
       setOverview(summary);
+      setOperatingCharter(settings.operating_charter?.value || "");
+      setAutonomyMode(settings.autonomy_mode?.value || "hybrid");
     } catch (err) {
       setError(err instanceof Error ? err.message : "Could not load workspace");
     } finally {
@@ -80,6 +86,23 @@ export default function WorkspacePanel() {
   }
 
   useEffect(() => { load(); }, []);
+
+  async function saveOperatingPreferences() {
+    setSettingsSaving(true);
+    setError("");
+    try {
+      await Promise.all([
+        api("/api/v1/workspace/settings/operating_charter", {
+          method: "PUT", body: JSON.stringify({ value: operatingCharter }),
+        }),
+        api("/api/v1/workspace/settings/autonomy_mode", {
+          method: "PUT", body: JSON.stringify({ value: autonomyMode }),
+        }),
+      ]);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Could not save preferences");
+    } finally { setSettingsSaving(false); }
+  }
 
   async function createProject(event: FormEvent) {
     event.preventDefault();
@@ -188,6 +211,26 @@ export default function WorkspacePanel() {
           <div className="text-xl font-semibold">{overview?.tasks?.blocked ?? "—"}</div>
           <div className="text-[11px] text-gray-500">Blocked</div>
         </div>
+      </section>
+
+      <section className="space-y-3 rounded-2xl border border-gray-800 bg-gray-900 p-3">
+        <div>
+          <h2 className="font-semibold">Operating preferences</h2>
+          <p className="mt-1 text-xs text-gray-500">The rules your assistant should follow across projects.</p>
+        </div>
+        <label className="block space-y-1">
+          <span className="text-xs text-gray-400">Autonomy</span>
+          <select value={autonomyMode} onChange={(e) => setAutonomyMode(e.target.value)} className="w-full rounded-xl border border-gray-700 bg-gray-950 px-3 py-2.5 text-sm">
+            <option value="assistant">Assistant — research and draft</option>
+            <option value="hybrid">Hybrid — execute approved work</option>
+            <option value="highly_autonomous">Highly autonomous — bounded routine work</option>
+          </select>
+        </label>
+        <label className="block space-y-1">
+          <span className="text-xs text-gray-400">Operating charter</span>
+          <textarea value={operatingCharter} onChange={(e) => setOperatingCharter(e.target.value)} rows={5} maxLength={12000} className="w-full rounded-xl border border-gray-700 bg-gray-950 px-3 py-2.5 text-sm" />
+        </label>
+        <button onClick={saveOperatingPreferences} disabled={settingsSaving} className="w-full rounded-xl bg-sky-600 py-2.5 text-sm font-medium disabled:opacity-40">{settingsSaving ? "Saving…" : "Save operating preferences"}</button>
       </section>
 
       <section className="space-y-3">
