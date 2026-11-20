@@ -3,6 +3,7 @@ from __future__ import annotations
 
 from typing import Optional, List
 import json
+from datetime import datetime, timezone
 from fastapi import FastAPI, HTTPException, Depends, Query
 
 from app.core_helpers import (
@@ -298,6 +299,30 @@ def register_core_more(app: FastAPI) -> None:
         finally:
             await db.close()
         return ChatResponse(thread_id=thread_id, reply=reply, message_id=message_id, model=model)
+
+    @app.get("/api/v1/usage")
+    async def model_usage(_auth=Depends(require_auth)):
+        db = await get_db()
+        try:
+            now = datetime.now(timezone.utc)
+            day_start = now.replace(hour=0, minute=0, second=0, microsecond=0).isoformat()
+            cur = await db.execute(
+                "SELECT COUNT(*) AS count FROM model_call_usage WHERE created_at>=?",
+                (day_start,),
+            )
+            count = (await cur.fetchone())["count"]
+            cur = await db.execute(
+                "SELECT id, model, status, created_at FROM model_call_usage ORDER BY created_at DESC LIMIT 10"
+            )
+            recent = [dict(row) for row in await cur.fetchall()]
+            return {
+                "calls_today": count,
+                "daily_limit": MODEL_DAILY_CALL_LIMIT,
+                "remaining": max(0, MODEL_DAILY_CALL_LIMIT - count),
+                "recent_calls": recent,
+            }
+        finally:
+            await db.close()
 
     @app.get("/api/v1/tools")
     async def list_available_tools(_auth=Depends(require_auth)):
