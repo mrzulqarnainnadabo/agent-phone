@@ -2,6 +2,8 @@
 from typing import Optional
 import uuid, json, hashlib
 from datetime import datetime, timedelta
+import hmac
+from fastapi import HTTPException
 
 
 def now_iso() -> str:
@@ -53,3 +55,53 @@ async def create_pending_approval(
     cur = await db.execute("SELECT * FROM approvals WHERE id = ?", (approval_id,))
     row = await cur.fetchone()
     return dict(row) if row else {"id": approval_id, "status": "pending"}
+
+
+
+async def consume_approved_action(db, *, approval_id: str, expected_payload_hash: str) -> dict:
+    """Atomically consume one approved, unexpired action bound to the expected payload hash."""
+    row = await (await db.execute("SELECT * FROM approvals WHERE id=?", (approval_id,))).fetchone()
+    if not row:
+        raise HTTPException(404, "Approval not found")
+    if row["status"] != "approved":
+        raise HTTPException(409, "Action has not been approved")
+    if row["executed_at"]:
+        raise HTTPException(409, "Approval has already been consumed")
+    if not row["action_payload_json"] or not row["payload_hash"] or not row["expires_at"]:
+        raise HTTPException(409, "Approval is not bound to a verifiable action payload")
+    if not hmac.compare_digest(row["payload_hash"], expected_payload_hash):
+        raise HTTPException(409, "Approved action payload does not match the requested execution")
+    try:
+        payload = json.loads(row["action_payload_json"])
+        canonical = json.dumps(payload, sort_keys=True, separators=(",", ":"), ensure_ascii=False)
+        digest = hashlib.sha256(canonical.encode("utf-8")).hexdigest()
+        expiry = datetime.fromisoformat(row["expires_at"])
+    except (ValueError, TypeError, json.JSONDecodeError) as exc:
+        raise HTTPException(409, "Approved action payload is invalid") from exc
+    if not hmac.compare_digest(digest, row["payload_hash"]):
+        raise HTTPException(409, "Approved action payload has been altered")
+    if expiry <= datetime.utcnow():
+        await db.execute(
+            "UPDATE approvals SET status='expired', decided_at=?, decision_note=? WHERE id=? AND status='approved' AND executed_at IS NULL",
+            (now_iso(), "Approval expired before execution.", approval_id),
+        )
+        await db.commit()
+        raise HTTPException(409, "Approval has expired")
+    cur = await db.execute(
+        "UPDATE approvals SET executed_at=? WHERE id=? AND status='approved' AND executed_at IS NULL AND payload_hash=?",
+        (now_iso(), approval_id, expected_payload_hash),
+    )
+    if cur.rowcount != 1:
+        await db.rollback()
+        raise HTTPException(409, "Approval was already consumed")
+    await db.commit()
+    return payload
+
+
+async def record_approval_execution_result(db, *, approval_id: str, result: dict) -> None:
+    """Persist the outcome of an already-consumed action without changing its approval decision."""
+    await db.execute(
+        "UPDATE approvals SET execution_result_json=? WHERE id=? AND executed_at IS NOT NULL",
+        (json.dumps(result, ensure_ascii=False)[:12000], approval_id),
+    )
+    await db.commit()
