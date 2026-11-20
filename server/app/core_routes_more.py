@@ -211,6 +211,8 @@ def register_core_more(app: FastAPI) -> None:
                 calls_used = 0
                 while assistant_message.get("tool_calls") and rounds < 3:
                     tool_calls = assistant_message["tool_calls"]
+                    if not isinstance(tool_calls, list):
+                        raise HTTPException(502, "AI model returned an invalid tool-call list")
                     messages.append({
                         "role": "assistant",
                         "content": assistant_message.get("content"),
@@ -222,6 +224,8 @@ def register_core_more(app: FastAPI) -> None:
                             tool_call = {}
                         call_id = tool_call.get("id", f"tool-{uuid.uuid4().hex[:8]}")
                         function = tool_call.get("function") or {}
+                        if not isinstance(function, dict):
+                            function = {}
                         tool_name = function.get("name", "")
                         raw_arguments = function.get("arguments", "{}")
                         result = None
@@ -266,6 +270,28 @@ def register_core_more(app: FastAPI) -> None:
         finally:
             await db.close()
         return ChatResponse(thread_id=thread_id, reply=reply, message_id=message_id, model=model)
+
+    @app.get("/api/v1/tools")
+    async def list_available_tools(_auth=Depends(require_auth)):
+        token, allowed = github_configuration()
+        return {
+            "tools": [item["function"]["name"] for item in tool_definitions()] if token and allowed else [],
+            "write_access": False,
+            "approval_required_for_writes": True,
+        }
+
+    @app.get("/api/v1/tools/audit")
+    async def list_tool_audit(limit: int = Query(50, ge=1, le=200), _auth=Depends(require_auth)):
+        db = await get_db()
+        try:
+            cur = await db.execute(
+                "SELECT id, thread_id, tool_name, arguments_json, outcome, created_at "
+                "FROM tool_audit ORDER BY created_at DESC LIMIT ?",
+                (limit,),
+            )
+            return [dict(row) for row in await cur.fetchall()]
+        finally:
+            await db.close()
 
     @app.get("/api/v1/threads/{thread_id}/messages")
     async def list_thread_messages(thread_id: str, limit: int = Query(100, ge=1, le=200), _auth=Depends(require_auth)):
