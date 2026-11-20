@@ -9,25 +9,39 @@ Built to sell to individuals and organizations — without Vercel/Supabase lock-
 
 ---
 
-## Current status (v0.8)
+## Current status (personal operations foundation — in progress)
 
+### Existing foundation
 - [x] Mobile-first Next.js 15 PWA (Add to Home Screen)
-- [x] FastAPI + SQLite + Bearer auth
-- [x] Agent identity (name, handle, purpose, personality)
-- [x] Permissions (read / draft / consequential)
-- [x] Approval policies + inbox (approve / reject)
-- [x] **Simulate proposal** for testing the approval loop
-- [x] Goals + max 3 agents per goal
-- [x] Explicit handoffs (create / accept / complete / reject)
-- [x] Goal Room UI with status line (Manus guidance)
-- [x] Docker Compose + persistent volume
-- [x] `/health` + `/ready`
-- [x] Railway / self-host deploy docs
-- [ ] Streaming model replies
-- [ ] Real tool execution after approval
-- [ ] Notion / calendar connectors
-- [ ] Multi-user / org isolation
-- [ ] Capacitor native shells
+- [x] FastAPI + SQLite persistence
+- [x] Agent identity, permissions, and approval policies
+- [x] Approval inbox and proposal simulation
+- [x] Goals, bounded agent membership, and handoffs
+- [x] Read-only Crypto Intelligence module (fixture provider by default)
+- [x] Docker Compose and existing hosting documentation
+
+### Personal operations foundation (working branch)
+- [x] CI-only GitHub Actions for backend tests and frontend production builds
+- [x] Regression coverage for core API authentication and approval lifecycle
+- [x] Fail-closed behaviour when API authentication is not configured
+- [x] Single-use approval decisions (missing and previously decided approvals rejected)
+- [x] Persistent project registry, tasks, checkpoints, decision records, and operating preferences
+- [x] Mobile Work tab for projects, tasks, preferences, and progress checkpoints
+- [x] Chat receives saved operating charter, project/task context, and recent checkpoints
+- [x] Server-controlled model selection and bounded chat history
+- [x] Structured model configuration/provider errors instead of placeholder assistant replies
+- [x] Frontend Dockerfile aligned with the existing non-standalone Next.js configuration
+
+### Not yet production-ready
+- [ ] Replace browser-exposed shared bearer token with a secure single-user session
+- [ ] Complete approval payload binding, expiry, and audit semantics
+- [ ] Typed tool registry and real tool execution after approval
+- [ ] GitHub read-only integration and verified engineering workflows
+- [ ] Usage budgets, token accounting, and cost limits
+- [ ] Daily briefing, reminders, and weekly review
+- [ ] Voice, calendar/email connectors, multi-user support
+
+**Important:** This branch is under development. The existing production deployment has not been changed. No production deployment, paid service, or merge to `main` is authorised by this work.
 
 ---
 
