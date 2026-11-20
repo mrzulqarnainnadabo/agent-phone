@@ -32,12 +32,14 @@ Built to sell to individuals and organizations — without Vercel/Supabase lock-
 - [x] Server-controlled model selection and bounded chat history
 - [x] Structured model configuration/provider errors instead of placeholder assistant replies
 - [x] Frontend Dockerfile aligned with the existing non-standalone Next.js configuration
+- [x] Allowlisted read-only GitHub API endpoints for repository metadata, pull requests, workflow runs, trees, and text files
+- [x] Work tab GitHub inspector for repository health, open PRs, and recent workflow runs
 
 ### Not yet production-ready
 - [ ] Complete XSS/sessionStorage review and enforce a stricter Content Security Policy before enabling external tools
 - [ ] Complete approval payload binding, expiry, and audit semantics
 - [ ] Typed tool registry and real tool execution after approval
-- [ ] GitHub read-only integration and verified engineering workflows
+- [ ] Model-driven GitHub tool calling and verified engineering workflows (read-only inspection UI/API exists)
 - [ ] Usage budgets, token accounting, and cost limits
 - [ ] Daily briefing, reminders, and weekly review
 - [ ] Voice, calendar/email connectors, multi-user support
