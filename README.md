@@ -25,7 +25,7 @@ Built to sell to individuals and organizations — without Vercel/Supabase lock-
 - [x] Regression coverage for core API authentication and approval lifecycle
 - [x] Password-based owner login, rate-limited sign-in, short-lived signed sessions, and server-side logout revocation
 - [x] No permanent bearer token or privileged credential embedded in the browser bundle
-- [x] Single-use approval decisions (missing and previously decided approvals rejected)
+- [x] Approval proposals bound to immutable payload hashes, expiry, tamper detection, and single-use consumption
 - [x] Persistent project registry, tasks, checkpoints, decision records, and operating preferences
 - [x] Mobile Work tab for projects, tasks, preferences, and progress checkpoints
 - [x] Chat receives saved operating charter, project/task context, and recent checkpoints
@@ -34,12 +34,13 @@ Built to sell to individuals and organizations — without Vercel/Supabase lock-
 - [x] Frontend Dockerfile aligned with the existing non-standalone Next.js configuration
 - [x] Allowlisted read-only GitHub API endpoints for repository metadata, pull requests, workflow runs, trees, and text files
 - [x] Work tab GitHub inspector for repository health, open PRs, and recent workflow runs
+- [x] Bounded model-driven GitHub read-only tool calling with server-side allowlist and audit records
 
 ### Not yet production-ready
 - [ ] Complete XSS/sessionStorage review and enforce a stricter Content Security Policy before enabling external tools
-- [ ] Complete approval payload binding, expiry, and audit semantics
+- [ ] Add real write-tool execution only after end-to-end approval and security review
 - [ ] Typed tool registry and real tool execution after approval
-- [ ] Model-driven GitHub tool calling and verified engineering workflows (read-only inspection UI/API exists)
+- [ ] Verified engineering workflows: repository changes, branch/PR creation and test execution after write-action approval gates
 - [ ] Usage budgets, token accounting, and cost limits
 - [ ] Daily briefing, reminders, and weekly review
 - [ ] Voice, calendar/email connectors, multi-user support
