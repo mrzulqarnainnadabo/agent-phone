@@ -64,8 +64,10 @@ Repository inspection found:
 **Exit criteria:** A user can create/manage projects and tasks, record decisions/checkpoints, and resume work after a restart without losing context.
 
 ### Stage 2 — Secure single-user access and action governance
-- Replace browser-exposed shared API token with a server-side session/authentication design suitable for a personal PWA.
-- Keep provider credentials and integration tokens server-side only.
+- [x] Replace browser-exposed shared API token with password login and short-lived HMAC-signed owner sessions; token is stored in sessionStorage, not in build-time configuration.
+- [x] Add SQLite-backed login-attempt tracking and rate-limit repeated failed password attempts.
+- [ ] Add session revocation and review the residual XSS/sessionStorage risk before enabling privileged tools.
+- [x] Keep owner password, session signing secret, and provider credentials server-side only.
 - Add CSRF protection where cookie sessions are used, secure cookie flags, rate limits, and security headers.
 - Harden approval lifecycle: validate pending state, action type/level, actor, expiry, immutable payload hash, and single-use execution.
 - Separate read, draft, reversible, and consequential capabilities.
@@ -116,7 +118,7 @@ Repository inspection found:
 
 ## 6. Immediate security and reliability blockers
 
-- Browser-visible bearer token.
+- Session token is held in browser sessionStorage; enforce a strong CSP and complete XSS review before privileged tools.
 - Missing tests for core API, approval state transitions, and chat.
 - Approval endpoints lack robust not-found/pending/replay checks.
 - Chat lets clients choose arbitrary system prompts and model names; errors are not returned as structured failures.
@@ -165,7 +167,7 @@ These are to be addressed in the order above; do not paper over them with UI-onl
 - No local shell execution was available through the GitHub repository connector; CI is the source of build/test verification.
 
 ### Remaining blockers before tool execution
-1. Replace the browser-exposed shared bearer token with a secure single-user session. Do not connect privileged tools before this is complete.
+1. Complete session revocation, CSP, and XSS review before connecting privileged tools.
 2. Bind approvals to immutable action payloads, add expiry and audit semantics, and prevent replay.
 3. Add typed tool registry, per-tool permissions, and a server-side executor.
 4. Add provider usage/cost accounting and request budgets.
