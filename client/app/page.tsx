@@ -37,6 +37,7 @@ export default function Home() {
   const [approvals, setApprovals] = useState<Approval[]>([]);
   const [goals, setGoals] = useState<Goal[]>([]);
   const [pendingCount, setPendingCount] = useState(0);
+  const [approvalNotice, setApprovalNotice] = useState("");
   const [showCreate, setShowCreate] = useState(false);
   const [showCreateGoal, setShowCreateGoal] = useState(false);
   const [activeGoalId, setActiveGoalId] = useState<string | null>(null);
@@ -115,7 +116,8 @@ export default function Home() {
   async function decideApproval(id: string, action: "approve" | "reject") {
     setLoading(true);
     try {
-      await api(`/api/v1/approvals/${id}/${action}`, { method: "POST", body: JSON.stringify({ note: action === "approve" ? "Approved" : "Rejected" }) });
+      const result = await api(`/api/v1/approvals/${id}/${action}`, { method: "POST", body: JSON.stringify({ note: action === "approve" ? "Approved" : "Rejected" }) });
+      setApprovalNotice(action === "approve" && result.execution_status === "not_executed" ? "Approval recorded. No external action has been executed." : action === "approve" ? "Approval recorded." : "Proposal rejected.");
       await loadApprovals();
     } catch (e) { console.error(e); } finally { setLoading(false); }
   }
@@ -197,6 +199,8 @@ export default function Home() {
               <h1 className="text-lg font-semibold">Approvals</h1>
               <button onClick={simulateProposal} disabled={loading} className="text-xs bg-gray-800 border border-gray-700 px-3 py-1.5 rounded-full">Simulate proposal</button>
             </div>
+            <p className="text-xs text-gray-500">Approving records authorization for the exact proposed action. It does not send, publish, merge or execute anything in this version.</p>
+            {approvalNotice && <p role="status" className="rounded-xl border border-gray-700 bg-gray-900 p-3 text-xs text-gray-300">{approvalNotice}</p>}
             {approvals.map((a) => (
               <div key={a.id} className="bg-gray-900 border border-gray-800 rounded-2xl p-4 space-y-2">
                 <div className="font-medium">{a.title}</div>
@@ -204,7 +208,7 @@ export default function Home() {
                 {a.proposed_output && <pre className="text-xs bg-gray-950 p-2 rounded-xl whitespace-pre-wrap">{a.proposed_output}</pre>}
                 <div className="flex gap-2">
                   <button onClick={() => decideApproval(a.id, "reject")} className="flex-1 py-2 rounded-xl border border-gray-700 text-sm">Reject</button>
-                  <button onClick={() => decideApproval(a.id, "approve")} className="flex-1 py-2 rounded-xl bg-sky-600 text-sm">Approve</button>
+                  <button onClick={() => decideApproval(a.id, "approve")} className="flex-1 py-2 rounded-xl bg-sky-600 text-sm">Authorize proposal</button>
                 </div>
               </div>
             ))}
