@@ -1,0 +1,76 @@
+"""Regression tests for Agent Phone's core API and approval state machine."""
+from fastapi import FastAPI
+from fastapi.testclient import TestClient
+import pytest
+
+from app import core_helpers
+from app.core_routes import register_core
+from app.core_routes_more import register_core_more
+
+
+@pytest.fixture()
+def client(tmp_path, monkeypatch):
+    monkeypatch.setattr(core_helpers, "DB_PATH", tmp_path / "agent-phone-test.sqlite3")
+    monkeypatch.setattr(core_helpers, "APP_AUTH_TOKEN", "test-token")
+    app = FastAPI()
+    register_core(app)
+    register_core_more(app)
+    with TestClient(app) as test_client:
+        yield test_client
+
+
+def auth():
+    return {"Authorization": "Bearer test-token"}
+
+
+def test_protected_agent_route_requires_auth(client):
+    response = client.get("/api/v1/agents")
+    assert response.status_code == 401
+
+
+def test_agent_can_be_created_and_listed(client):
+    created = client.post(
+        "/api/v1/agents",
+        headers=auth(),
+        json={"name": "Researcher", "handle": "researcher", "purpose": "Research projects"},
+    )
+    assert created.status_code == 200
+    assert created.json()["handle"] == "researcher"
+
+    listed = client.get("/api/v1/agents", headers=auth())
+    assert listed.status_code == 200
+    assert any(agent["id"] == created.json()["id"] for agent in listed.json())
+
+
+def test_unknown_approval_cannot_be_approved_or_rejected(client):
+    payload = {"note": "test"}
+    assert client.post("/api/v1/approvals/missing/approve", headers=auth(), json=payload).status_code == 404
+    assert client.post("/api/v1/approvals/missing/reject", headers=auth(), json=payload).status_code == 404
+
+
+def test_approval_decision_is_single_use(client):
+    created = client.post("/api/v1/approvals/demo", headers=auth())
+    assert created.status_code == 200
+    approval_id = created.json()["id"]
+
+    approved = client.post(
+        f"/api/v1/approvals/{approval_id}/approve",
+        headers=auth(),
+        json={"note": "Reviewed and approved"},
+    )
+    assert approved.status_code == 200
+    assert approved.json()["status"] == "approved"
+
+    replay = client.post(
+        f"/api/v1/approvals/{approval_id}/reject",
+        headers=auth(),
+        json={"note": "Attempted second decision"},
+    )
+    assert replay.status_code == 409
+
+
+def test_authentication_fails_closed_when_token_is_unconfigured(client, monkeypatch):
+    monkeypatch.setattr(core_helpers, "APP_AUTH_TOKEN", "")
+    response = client.get("/api/v1/agents", headers=auth())
+    assert response.status_code == 503
+    assert response.json()["detail"] == "Authentication is not configured"
