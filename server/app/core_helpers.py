@@ -39,28 +39,34 @@ def create_session_token() -> str:
         raise HTTPException(503, "Session authentication is not configured securely")
     now = int(time.time())
     payload = _b64url_encode(json.dumps(
-        {"sub": "owner", "iat": now, "exp": now + SESSION_TTL_SECONDS},
+        {"sub": "owner", "jti": uuid.uuid4().hex, "iat": now, "exp": now + SESSION_TTL_SECONDS},
         separators=(",", ":"),
     ).encode("utf-8"))
     signature = hmac.new(SESSION_SECRET.encode("utf-8"), payload.encode("ascii"), hashlib.sha256).digest()
     return payload + "." + _b64url_encode(signature)
 
 
-def verify_session_token(token: str) -> bool:
+def decode_session_payload(token: str) -> Optional[dict]:
     if not _session_configured() or "." not in token:
-        return False
+        return None
     payload, supplied_signature = token.split(".", 1)
     expected = _b64url_encode(hmac.new(
         SESSION_SECRET.encode("utf-8"), payload.encode("ascii"), hashlib.sha256
     ).digest())
     if not hmac.compare_digest(supplied_signature, expected):
-        return False
+        return None
     try:
         padded = payload + "=" * (-len(payload) % 4)
         data = json.loads(base64.urlsafe_b64decode(padded.encode("ascii")))
-        return data.get("sub") == "owner" and int(data.get("exp", 0)) > int(time.time())
+        if data.get("sub") != "owner" or int(data.get("exp", 0)) <= int(time.time()):
+            return None
+        return data
     except (ValueError, TypeError, json.JSONDecodeError, binascii.Error):
-        return False
+        return None
+
+
+def verify_session_token(token: str) -> bool:
+    return decode_session_payload(token) is not None
 
 
 async def require_auth(authorization: Optional[str] = Header(None)):
@@ -71,6 +77,17 @@ async def require_auth(authorization: Optional[str] = Header(None)):
     token = authorization[7:].strip()
     if not verify_session_token(token):
         raise HTTPException(401, "Session is invalid or expired")
+    token_hash = hashlib.sha256(token.encode("utf-8")).hexdigest()
+    db = await get_db()
+    try:
+        revoked = await (await db.execute(
+            "SELECT token_hash FROM revoked_sessions WHERE token_hash=?",
+            (token_hash,),
+        )).fetchone()
+    finally:
+        await db.close()
+    if revoked:
+        raise HTTPException(401, "Session has been signed out")
     return True
 
 
@@ -91,6 +108,8 @@ async def init_db():
         db.row_factory = aiosqlite.Row
         await db.executescript("""
             CREATE TABLE IF NOT EXISTS threads (id TEXT PRIMARY KEY, title TEXT, system_prompt TEXT, created_at TEXT, updated_at TEXT);
+            CREATE TABLE IF NOT EXISTS revoked_sessions (token_hash TEXT PRIMARY KEY, expires_at INTEGER NOT NULL, revoked_at TEXT NOT NULL);
+            CREATE INDEX IF NOT EXISTS idx_revoked_sessions_expiry ON revoked_sessions(expires_at);
             CREATE TABLE IF NOT EXISTS messages (id TEXT PRIMARY KEY, thread_id TEXT, role TEXT, content TEXT, created_at TEXT, FOREIGN KEY (thread_id) REFERENCES threads(id));
             CREATE TABLE IF NOT EXISTS agents (id TEXT PRIMARY KEY, name TEXT NOT NULL, handle TEXT NOT NULL UNIQUE, purpose TEXT NOT NULL, personality TEXT, system_instructions TEXT, status TEXT NOT NULL DEFAULT 'active' CHECK (status IN ('active','paused','archived')), approval_mode TEXT NOT NULL DEFAULT 'ask_consequential' CHECK (approval_mode IN ('always_ask','ask_consequential','draft_only')), created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP, updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP);
             CREATE TABLE IF NOT EXISTS agent_permissions (id TEXT PRIMARY KEY, agent_id TEXT NOT NULL, capability TEXT NOT NULL, level TEXT NOT NULL CHECK (level IN ('read','draft','consequential')), created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP, UNIQUE(agent_id, capability), FOREIGN KEY(agent_id) REFERENCES agents(id) ON DELETE CASCADE);
