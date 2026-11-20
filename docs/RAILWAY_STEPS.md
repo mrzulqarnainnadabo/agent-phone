@@ -14,6 +14,8 @@ Required server-side variables:
 APP_LOGIN_PASSWORD=<unique owner password, at least 12 characters>
 SESSION_SECRET=<random secret generated with openssl rand -hex 32>
 SESSION_TTL_SECONDS=28800
+APP_ENV=production
+CORS_ORIGINS=https://agent-phone.netlify.app
 DATA_DIR=/data
 HOST=0.0.0.0
 PORT=8000
