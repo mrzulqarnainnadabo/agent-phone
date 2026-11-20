@@ -3,7 +3,7 @@ from __future__ import annotations
 
 from typing import Optional, List
 import hashlib, hmac, json
-from datetime import datetime
+from datetime import datetime, timezone
 from fastapi import FastAPI, HTTPException, Depends, Query
 
 from app.core_helpers import (
@@ -208,6 +208,8 @@ def register_core(app: FastAPI) -> None:
                     canonical = json.dumps(payload, sort_keys=True, separators=(",", ":"), ensure_ascii=False)
                     computed_hash = hashlib.sha256(canonical.encode("utf-8")).hexdigest()
                     expiry = datetime.fromisoformat(expires_at)
+                    if expiry.tzinfo is None:
+                        expiry = expiry.replace(tzinfo=timezone.utc)
                 except (ValueError, TypeError, json.JSONDecodeError):
                     raise HTTPException(409, "Approval payload or expiry is invalid")
                 if not hmac.compare_digest(computed_hash, payload_hash):
@@ -217,7 +219,7 @@ def register_core(app: FastAPI) -> None:
                     )
                     await db.commit()
                     raise HTTPException(409, "Approval payload has changed; proposal was cancelled")
-                if expiry <= datetime.utcnow():
+                if expiry <= datetime.now(timezone.utc):
                     await db.execute(
                         "UPDATE approvals SET status='expired', decided_at=?, decision_note=? WHERE id=? AND status='pending'",
                         (now_iso(), "Approval expired before decision.", approval_id),
