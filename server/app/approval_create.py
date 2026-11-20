@@ -1,13 +1,13 @@
 """Create pending approvals — the agent proposes, the human decides."""
 from typing import Optional
 import uuid, json, hashlib
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 import hmac
 from fastapi import HTTPException
 
 
 def now_iso() -> str:
-    return datetime.utcnow().isoformat()
+    return datetime.now(timezone.utc).isoformat()
 
 
 async def create_pending_approval(
@@ -45,7 +45,7 @@ async def create_pending_approval(
     if len(canonical_payload) > 12000:
         raise HTTPException(413, "Action payload is too large to approve")
     payload_hash = hashlib.sha256(canonical_payload.encode("utf-8")).hexdigest()
-    expires_at = (datetime.utcnow() + timedelta(seconds=max(60, min(ttl_seconds, 604800)))).isoformat()
+    expires_at = (datetime.now(timezone.utc) + timedelta(seconds=max(60, min(ttl_seconds, 604800)))).isoformat()
     await db.execute(
         """INSERT INTO approvals
            (id, agent_id, goal_id, action_type, action_level, title, description,
@@ -81,11 +81,13 @@ async def consume_approved_action(db, *, approval_id: str, expected_payload_hash
         canonical = json.dumps(payload, sort_keys=True, separators=(",", ":"), ensure_ascii=False)
         digest = hashlib.sha256(canonical.encode("utf-8")).hexdigest()
         expiry = datetime.fromisoformat(row["expires_at"])
+        if expiry.tzinfo is None:
+            expiry = expiry.replace(tzinfo=timezone.utc)
     except (ValueError, TypeError, json.JSONDecodeError) as exc:
         raise HTTPException(409, "Approved action payload is invalid") from exc
     if not hmac.compare_digest(digest, row["payload_hash"]):
         raise HTTPException(409, "Approved action payload has been altered")
-    if expiry <= datetime.utcnow():
+    if expiry <= datetime.now(timezone.utc):
         await db.execute(
             "UPDATE approvals SET status='expired', decided_at=?, decision_note=? WHERE id=? AND status='approved' AND executed_at IS NULL",
             (now_iso(), "Approval expired before execution.", approval_id),
