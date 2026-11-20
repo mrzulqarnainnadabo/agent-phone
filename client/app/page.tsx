@@ -3,9 +3,10 @@
 import { useState, useEffect, useRef } from "react";
 import MarketsPanel from "./MarketsPanel";
 import WorkspacePanel from "./WorkspacePanel";
+import AuthScreen from "./AuthScreen";
+import { clearSessionToken, expireSession, getSessionToken } from "./auth";
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
-const AUTH_TOKEN = process.env.NEXT_PUBLIC_APP_AUTH_TOKEN || "dev-token-change-me";
 
 type Tab = "home" | "workspace" | "agents" | "goals" | "approvals" | "markets";
 type Agent = { id: string; name: string; handle: string; purpose: string; personality?: string; status: string; approval_mode: string };
@@ -18,9 +19,10 @@ type Message = { id: string; role: "user" | "assistant"; content: string };
 async function api(path: string, options: RequestInit = {}) {
   const res = await fetch(`${API_URL}${path}`, {
     ...options,
-    headers: { "Content-Type": "application/json", Authorization: `Bearer ${AUTH_TOKEN}`, ...(options.headers || {}) },
+    headers: { "Content-Type": "application/json", Authorization: `Bearer ${getSessionToken()}`, ...(options.headers || {}) },
   });
   if (!res.ok) {
+    if (res.status === 401) expireSession();
     const err = await res.json().catch(() => ({}));
     throw new Error(err.detail || `HTTP ${res.status}`);
   }
@@ -28,6 +30,8 @@ async function api(path: string, options: RequestInit = {}) {
 }
 
 export default function Home() {
+  const [authReady, setAuthReady] = useState(false);
+  const [authenticated, setAuthenticated] = useState(false);
   const [tab, setTab] = useState<Tab>("home");
   const [agents, setAgents] = useState<Agent[]>([]);
   const [approvals, setApprovals] = useState<Approval[]>([]);
@@ -43,8 +47,21 @@ export default function Home() {
   const [chatLoading, setChatLoading] = useState(false);
   const bottomRef = useRef<HTMLDivElement>(null);
 
-  useEffect(() => { loadAgents(); loadApprovals(); loadGoals(); loadConversation(); }, []);
+  useEffect(() => {
+    setAuthenticated(Boolean(getSessionToken()));
+    setAuthReady(true);
+    const onExpired = () => setAuthenticated(false);
+    window.addEventListener("agent-phone-session-expired", onExpired);
+    return () => window.removeEventListener("agent-phone-session-expired", onExpired);
+  }, []);
+  useEffect(() => {
+    if (authenticated) { loadAgents(); loadApprovals(); loadGoals(); loadConversation(); }
+  }, [authenticated]);
   useEffect(() => { bottomRef.current?.scrollIntoView({ behavior: "smooth" }); }, [messages]);
+
+  if (!authReady) return <main className="min-h-dvh bg-gray-950 text-gray-400 flex items-center justify-center text-sm">Loading Agent Phone…</main>;
+  if (!authenticated) return <AuthScreen onAuthenticated={() => setAuthenticated(true)} />;
+
 
   async function loadAgents() { try { setAgents(await api("/api/v1/agents")); } catch (e) { console.error(e); } }
   async function loadApprovals() {
@@ -119,7 +136,7 @@ export default function Home() {
                 <h1 className="text-lg font-semibold">Agent Phone</h1>
                 <p className="text-xs text-gray-400">Personal operations</p>
               </div>
-              <button onClick={startNewChat} className="rounded-full border border-gray-700 px-3 py-1.5 text-xs text-gray-300">New chat</button>
+              <div className="flex items-center gap-2"><button onClick={startNewChat} className="rounded-full border border-gray-700 px-3 py-1.5 text-xs text-gray-300">New chat</button><button onClick={() => { clearSessionToken(); setAuthenticated(false); }} className="rounded-full border border-gray-800 px-3 py-1.5 text-xs text-gray-500">Sign out</button></div>
             </header>
             <div className="flex-1 px-3 py-4 space-y-3 overflow-y-auto">
               {messages.map((msg) => (
