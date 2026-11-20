@@ -63,12 +63,19 @@ export default function WorkspacePanel() {
   const [operatingCharter, setOperatingCharter] = useState("");
   const [autonomyMode, setAutonomyMode] = useState("hybrid");
   const [settingsSaving, setSettingsSaving] = useState(false);
+  const [githubConfigured, setGithubConfigured] = useState(false);
+  const [githubRepo, setGithubRepo] = useState("mrzulqarnainnadabo/agent-phone");
+  const [githubSummary, setGithubSummary] = useState<any>(null);
+  const [githubPulls, setGithubPulls] = useState<any[]>([]);
+  const [githubRuns, setGithubRuns] = useState<any[]>([]);
+  const [githubLoading, setGithubLoading] = useState(false);
+  const [githubError, setGithubError] = useState("");
 
   async function load() {
     setLoading(true);
     setError("");
     try {
-      const [projectList, taskList, summary, settings] = await Promise.all([
+      const [projectList, taskList, summary, settings, githubStatus] = await Promise.all([
         api("/api/v1/workspace/projects"),
         api("/api/v1/workspace/tasks?limit=50"),
         api("/api/v1/workspace/overview"),
@@ -79,6 +86,7 @@ export default function WorkspacePanel() {
       setOverview(summary);
       setOperatingCharter(settings.operating_charter?.value || "");
       setAutonomyMode(settings.autonomy_mode?.value || "hybrid");
+      setGithubConfigured(Boolean(githubStatus.configured));
     } catch (err) {
       setError(err instanceof Error ? err.message : "Could not load workspace");
     } finally {
@@ -87,6 +95,30 @@ export default function WorkspacePanel() {
   }
 
   useEffect(() => { load(); }, []);
+
+  async function inspectGitHubRepository() {
+    const parts = githubRepo.trim().split("/");
+    if (parts.length !== 2 || !parts[0] || !parts[1]) {
+      setGithubError("Enter a repository as owner/name.");
+      return;
+    }
+    setGithubLoading(true);
+    setGithubError("");
+    try {
+      const base = `/api/v1/github/repos/${encodeURIComponent(parts[0])}/${encodeURIComponent(parts[1])}`;
+      const [summary, pulls, runs] = await Promise.all([
+        api(base),
+        api(`${base}/pull-requests?state=open&limit=10`),
+        api(`${base}/workflow-runs?limit=10`),
+      ]);
+      setGithubSummary(summary);
+      setGithubPulls(pulls);
+      setGithubRuns(runs);
+    } catch (err) {
+      setGithubError(err instanceof Error ? err.message : "Could not inspect repository");
+      setGithubSummary(null); setGithubPulls([]); setGithubRuns([]);
+    } finally { setGithubLoading(false); }
+  }
 
   async function saveOperatingPreferences() {
     setSettingsSaving(true);
@@ -341,6 +373,42 @@ export default function WorkspacePanel() {
             <p className="text-[10px] text-gray-600">{new Date(checkpoint.created_at).toLocaleString()}</p>
           </article>
         ))}
+      </section>
+
+      <section className="space-y-3 rounded-2xl border border-gray-800 bg-gray-900 p-3">
+        <div>
+          <h2 className="font-semibold">GitHub repository inspector</h2>
+          <p className="mt-1 text-xs text-gray-500">Read-only repository, pull request and workflow information. No code changes or write access.</p>
+        </div>
+        <input value={githubRepo} onChange={(e) => setGithubRepo(e.target.value)} placeholder="owner/repository" className="w-full rounded-xl border border-gray-700 bg-gray-950 px-3 py-2.5 text-sm" />
+        {!githubConfigured && <p className="text-xs text-amber-300">Not connected. Configure GITHUB_TOKEN and GITHUB_ALLOWED_REPOS on the API server to enable inspection.</p>}
+        {githubError && <p role="alert" className="text-xs text-red-300">{githubError}</p>}
+        <button onClick={inspectGitHubRepository} disabled={!githubConfigured || githubLoading} className="w-full rounded-xl border border-gray-700 py-2.5 text-sm disabled:opacity-40">{githubLoading ? "Inspecting…" : "Inspect repository"}</button>
+        {githubSummary && (
+          <div className="space-y-3 border-t border-gray-800 pt-3">
+            <div className="flex items-start justify-between gap-3">
+              <div>
+                <p className="font-medium text-sm">{githubSummary.full_name}</p>
+                <p className="text-xs text-gray-500">{githubSummary.description || "No description"} · {githubSummary.language || "Language not detected"}</p>
+              </div>
+              <a href={githubSummary.html_url} target="_blank" rel="noreferrer" className="text-xs text-sky-400 underline">Open</a>
+            </div>
+            <div className="grid grid-cols-2 gap-2 text-xs text-gray-400">
+              <span>Default branch: {githubSummary.default_branch}</span>
+              <span>Open issues: {githubSummary.open_issues_count}</span>
+            </div>
+            <div className="space-y-2">
+              <p className="text-xs font-medium text-gray-300">Open pull requests ({githubPulls.length})</p>
+              {githubPulls.length === 0 && <p className="text-xs text-gray-500">No open pull requests.</p>}
+              {githubPulls.map((pull) => <a key={pull.number} href={pull.html_url} target="_blank" rel="noreferrer" className="block rounded-lg border border-gray-800 p-2 text-xs"><span className="text-gray-500">#{pull.number}</span> {pull.title}</a>)}
+            </div>
+            <div className="space-y-2">
+              <p className="text-xs font-medium text-gray-300">Recent workflow runs</p>
+              {githubRuns.length === 0 && <p className="text-xs text-gray-500">No workflow runs returned.</p>}
+              {githubRuns.slice(0, 5).map((run) => <a key={run.id} href={run.html_url} target="_blank" rel="noreferrer" className="flex items-center justify-between gap-2 rounded-lg border border-gray-800 p-2 text-xs"><span className="truncate">{run.display_title || run.name}</span><span className={run.conclusion === "success" ? "text-emerald-400" : run.conclusion === "failure" ? "text-red-400" : "text-gray-400"}>{run.conclusion || run.status}</span></a>)}
+            </div>
+          </div>
+        )}
       </section>
     </div>
   );
