@@ -3,7 +3,7 @@ from __future__ import annotations
 
 from typing import Optional, List
 from fastapi import HTTPException, Depends, Header, Query
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 import os, uuid, json, aiosqlite, httpx, hmac
 from datetime import datetime
 from pathlib import Path
@@ -73,7 +73,8 @@ async def init_db():
             await db.commit()
 
 class ChatRequest(BaseModel):
-    thread_id: Optional[str]=None; message: str; system_prompt: Optional[str]=None; model: Optional[str]=None
+    thread_id: Optional[str] = None
+    message: str = Field(..., min_length=1, max_length=12000)
 class ChatResponse(BaseModel):
     thread_id: str; reply: str; message_id: str; model: str
 class AgentCreate(BaseModel):
@@ -102,11 +103,29 @@ class HandoffNote(BaseModel):
     note: Optional[str]=None
 
 async def call_model(messages, model):
-    if not MODEL_API_KEY: return "[No MODEL_API_KEY set]"
-    async with httpx.AsyncClient(timeout=60.0) as client:
-        try:
-            r = await client.post(f"{MODEL_API_BASE_URL}/chat/completions", headers={"Authorization": f"Bearer {MODEL_API_KEY}", "Content-Type": "application/json"},
-                json={"model": model, "messages": messages, "temperature": 0.7, "max_tokens": 1024})
-            r.raise_for_status()
-            return r.json()["choices"][0]["message"]["content"].strip()
-        except Exception as e: return f"Model error: {e}"
+    if not MODEL_API_KEY:
+        raise HTTPException(503, "AI model provider is not configured")
+    try:
+        async with httpx.AsyncClient(timeout=60.0) as client:
+            response = await client.post(
+                f"{MODEL_API_BASE_URL}/chat/completions",
+                headers={
+                    "Authorization": f"Bearer {MODEL_API_KEY}",
+                    "Content-Type": "application/json",
+                },
+                json={"model": model, "messages": messages, "temperature": 0.4, "max_tokens": 1024},
+            )
+            response.raise_for_status()
+            payload = response.json()
+            reply = payload["choices"][0]["message"]["content"]
+            if not isinstance(reply, str) or not reply.strip():
+                raise HTTPException(502, "AI model returned an empty or invalid response")
+            return reply.strip()
+    except HTTPException:
+        raise
+    except httpx.TimeoutException as exc:
+        raise HTTPException(504, "AI model request timed out") from exc
+    except httpx.HTTPError as exc:
+        raise HTTPException(502, "AI model provider request failed") from exc
+    except (KeyError, IndexError, TypeError, ValueError) as exc:
+        raise HTTPException(502, "AI model returned an invalid response") from exc
