@@ -142,24 +142,31 @@ def register_core(app: FastAPI) -> None:
         finally:
             await db.close()
 
-    @app.post("/api/v1/approvals/{approval_id}/approve")
-    async def approve(approval_id: str, body: ApprovalDecision, _auth=Depends(require_auth)):
+    async def _decide_approval(approval_id: str, decision: str, note: Optional[str]):
         db = await get_db()
         try:
-            await db.execute("UPDATE approvals SET status='approved', decided_at=?, decision_note=? WHERE id=?",
-                (now_iso(), body.note or "Approved", approval_id))
+            cur = await db.execute("SELECT id, status FROM approvals WHERE id=?", (approval_id,))
+            row = await cur.fetchone()
+            if not row:
+                raise HTTPException(404, "Approval not found")
+            if row["status"] != "pending":
+                raise HTTPException(409, f"Approval is already {row['status']}")
+            cur = await db.execute(
+                "UPDATE approvals SET status=?, decided_at=?, decision_note=? WHERE id=? AND status='pending'",
+                (decision, now_iso(), note or decision.capitalize(), approval_id),
+            )
+            if cur.rowcount != 1:
+                await db.rollback()
+                raise HTTPException(409, "Approval was already decided")
             await db.commit()
-            return {"ok": True, "status": "approved"}
+            return {"ok": True, "status": decision}
         finally:
             await db.close()
 
+    @app.post("/api/v1/approvals/{approval_id}/approve")
+    async def approve(approval_id: str, body: ApprovalDecision, _auth=Depends(require_auth)):
+        return await _decide_approval(approval_id, "approved", body.note)
+
     @app.post("/api/v1/approvals/{approval_id}/reject")
     async def reject(approval_id: str, body: ApprovalDecision, _auth=Depends(require_auth)):
-        db = await get_db()
-        try:
-            await db.execute("UPDATE approvals SET status='rejected', decided_at=?, decision_note=? WHERE id=?",
-                (now_iso(), body.note or "Rejected", approval_id))
-            await db.commit()
-            return {"ok": True, "status": "rejected"}
-        finally:
-            await db.close()
+        return await _decide_approval(approval_id, "rejected", body.note)
