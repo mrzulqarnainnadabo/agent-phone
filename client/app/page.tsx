@@ -43,7 +43,7 @@ export default function Home() {
   const [chatLoading, setChatLoading] = useState(false);
   const bottomRef = useRef<HTMLDivElement>(null);
 
-  useEffect(() => { loadAgents(); loadApprovals(); loadGoals(); }, []);
+  useEffect(() => { loadAgents(); loadApprovals(); loadGoals(); loadConversation(); }, []);
   useEffect(() => { bottomRef.current?.scrollIntoView({ behavior: "smooth" }); }, [messages]);
 
   async function loadAgents() { try { setAgents(await api("/api/v1/agents")); } catch (e) { console.error(e); } }
@@ -54,6 +54,26 @@ export default function Home() {
     } catch (e) { console.error(e); }
   }
   async function loadGoals() { try { setGoals(await api("/api/v1/goals")); } catch (e) { console.error(e); } }
+
+  async function loadConversation() {
+    try {
+      const threads = await api("/api/v1/threads");
+      if (!threads.length) return;
+      const latest = threads[0];
+      const history = await api(`/api/v1/threads/${latest.id}/messages`);
+      if (history.length) {
+        setThreadId(latest.id);
+        setMessages(history.map((message: any) => ({
+          id: message.id, role: message.role, content: message.content,
+        })));
+      }
+    } catch (e) { console.error(e); }
+  }
+
+  function startNewChat() {
+    setThreadId(null);
+    setMessages([{ id: "welcome", role: "assistant", content: "Welcome back. What should we work on?" }]);
+  }
 
   async function sendChat() {
     const text = input.trim();
@@ -94,9 +114,12 @@ export default function Home() {
       <main className="flex-1 overflow-y-auto">
         {tab === "home" && (
           <div className="flex flex-col h-full">
-            <header className="px-4 py-3 border-b border-gray-800">
-              <h1 className="text-lg font-semibold">Agent Phone</h1>
-              <p className="text-xs text-gray-400">Control room</p>
+            <header className="px-4 py-3 border-b border-gray-800 flex items-center justify-between gap-3">
+              <div>
+                <h1 className="text-lg font-semibold">Agent Phone</h1>
+                <p className="text-xs text-gray-400">Personal operations</p>
+              </div>
+              <button onClick={startNewChat} className="rounded-full border border-gray-700 px-3 py-1.5 text-xs text-gray-300">New chat</button>
             </header>
             <div className="flex-1 px-3 py-4 space-y-3 overflow-y-auto">
               {messages.map((msg) => (
