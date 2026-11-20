@@ -196,3 +196,42 @@ async def call_model(messages, model):
         raise HTTPException(502, "AI model provider request failed") from exc
     except (KeyError, IndexError, TypeError, ValueError) as exc:
         raise HTTPException(502, "AI model returned an invalid response") from exc
+
+
+
+async def call_model_with_tools(messages, model, tools):
+    if not MODEL_API_KEY:
+        raise HTTPException(503, "AI model provider is not configured")
+    try:
+        async with httpx.AsyncClient(timeout=60.0) as client:
+            response = await client.post(
+                f"{MODEL_API_BASE_URL}/chat/completions",
+                headers={
+                    "Authorization": f"Bearer {MODEL_API_KEY}",
+                    "Content-Type": "application/json",
+                },
+                json={
+                    "model": model,
+                    "messages": messages,
+                    "tools": tools,
+                    "tool_choice": "auto",
+                    "temperature": 0.2,
+                    "max_tokens": 1024,
+                },
+            )
+            response.raise_for_status()
+            payload = response.json()
+            message = payload["choices"][0]["message"]
+            if not isinstance(message, dict):
+                raise HTTPException(502, "AI model returned an invalid tool response")
+            if not message.get("content") and not message.get("tool_calls"):
+                raise HTTPException(502, "AI model returned neither a reply nor a tool call")
+            return message
+    except HTTPException:
+        raise
+    except httpx.TimeoutException as exc:
+        raise HTTPException(504, "AI model request timed out") from exc
+    except httpx.HTTPError as exc:
+        raise HTTPException(502, "AI model provider request failed") from exc
+    except (KeyError, IndexError, TypeError, ValueError) as exc:
+        raise HTTPException(502, "AI model returned an invalid tool response") from exc
