@@ -23,7 +23,8 @@ Built to sell to individuals and organizations — without Vercel/Supabase lock-
 ### Personal operations foundation (working branch)
 - [x] CI-only GitHub Actions for backend tests and frontend production builds
 - [x] Regression coverage for core API authentication and approval lifecycle
-- [x] Fail-closed behaviour when API authentication is not configured
+- [x] Password-based owner login, rate-limited sign-in, and short-lived signed sessions
+- [x] No permanent bearer token or privileged credential embedded in the browser bundle
 - [x] Single-use approval decisions (missing and previously decided approvals rejected)
 - [x] Persistent project registry, tasks, checkpoints, decision records, and operating preferences
 - [x] Mobile Work tab for projects, tasks, preferences, and progress checkpoints
@@ -33,7 +34,7 @@ Built to sell to individuals and organizations — without Vercel/Supabase lock-
 - [x] Frontend Dockerfile aligned with the existing non-standalone Next.js configuration
 
 ### Not yet production-ready
-- [ ] Replace browser-exposed shared bearer token with a secure single-user session
+- [ ] Add session revocation and a complete security review before enabling external tools
 - [ ] Complete approval payload binding, expiry, and audit semantics
 - [ ] Typed tool registry and real tool execution after approval
 - [ ] GitHub read-only integration and verified engineering workflows
