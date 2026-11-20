@@ -163,3 +163,11 @@ def test_chat_uses_saved_operating_charter_and_project_context(client, monkeypat
 def test_unknown_conversation_history_returns_404(client):
     response = client.get("/api/v1/threads/not-a-thread/messages", headers=headers())
     assert response.status_code == 404
+
+
+def test_api_sets_baseline_security_headers(client):
+    response = client.get("/health")
+    assert response.status_code == 200
+    assert response.headers["x-content-type-options"] == "nosniff"
+    assert response.headers["x-frame-options"] == "DENY"
+    assert response.headers["referrer-policy"] == "strict-origin-when-cross-origin"
