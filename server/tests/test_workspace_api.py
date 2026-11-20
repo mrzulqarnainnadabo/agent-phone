@@ -10,13 +10,14 @@ import app.core_routes_more as core_routes_more
 @pytest.fixture()
 def client(tmp_path, monkeypatch):
     monkeypatch.setattr(core_helpers, "DB_PATH", tmp_path / "workspace-test.sqlite3")
-    monkeypatch.setattr(core_helpers, "APP_AUTH_TOKEN", "test-token")
+    monkeypatch.setattr(core_helpers, "APP_LOGIN_PASSWORD", "test-owner-password")
+    monkeypatch.setattr(core_helpers, "SESSION_SECRET", "test-session-secret-at-least-32-characters")
     with TestClient(app) as test_client:
         yield test_client
 
 
 def headers():
-    return {"Authorization": "Bearer test-token"}
+    return {"Authorization": f"Bearer {core_helpers.create_session_token()}"}
 
 
 def test_workspace_projects_tasks_and_checkpoints_persist(client):
