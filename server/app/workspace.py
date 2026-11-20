@@ -13,95 +13,75 @@ from app.core_helpers import get_db, now_iso, require_auth
 router = APIRouter(prefix="/api/v1/workspace", tags=["workspace"])
 
 
+async def ensure_workspace_tables(db):
+    await db.executescript(
+        """
+        CREATE TABLE IF NOT EXISTS workspace_projects (
+            id TEXT PRIMARY KEY, name TEXT NOT NULL, description TEXT NOT NULL DEFAULT '',
+            status TEXT NOT NULL DEFAULT 'active' CHECK(status IN ('active','paused','completed','archived')),
+            priority TEXT NOT NULL DEFAULT 'normal' CHECK(priority IN ('low','normal','high','urgent')),
+            repository_url TEXT, production_url TEXT, documentation_url TEXT,
+            created_at TEXT NOT NULL, updated_at TEXT NOT NULL
+        );
+        CREATE TABLE IF NOT EXISTS workspace_tasks (
+            id TEXT PRIMARY KEY, project_id TEXT, title TEXT NOT NULL, description TEXT NOT NULL DEFAULT '',
+            status TEXT NOT NULL DEFAULT 'todo' CHECK(status IN ('todo','in_progress','blocked','done','cancelled')),
+            priority TEXT NOT NULL DEFAULT 'normal' CHECK(priority IN ('low','normal','high','urgent')),
+            due_date TEXT, assigned_agent_id TEXT, created_at TEXT NOT NULL, updated_at TEXT NOT NULL,
+            completed_at TEXT,
+            FOREIGN KEY(project_id) REFERENCES workspace_projects(id) ON DELETE SET NULL,
+            FOREIGN KEY(assigned_agent_id) REFERENCES agents(id) ON DELETE SET NULL
+        );
+        CREATE TABLE IF NOT EXISTS workspace_checkpoints (
+            id TEXT PRIMARY KEY, project_id TEXT, task_id TEXT, summary TEXT NOT NULL,
+            completed_work TEXT NOT NULL DEFAULT '', next_action TEXT NOT NULL DEFAULT '',
+            blockers TEXT NOT NULL DEFAULT '', evidence_urls TEXT NOT NULL DEFAULT '[]',
+            created_at TEXT NOT NULL,
+            FOREIGN KEY(project_id) REFERENCES workspace_projects(id) ON DELETE SET NULL,
+            FOREIGN KEY(task_id) REFERENCES workspace_tasks(id) ON DELETE SET NULL
+        );
+        CREATE TABLE IF NOT EXISTS workspace_decisions (
+            id TEXT PRIMARY KEY, project_id TEXT, title TEXT NOT NULL, decision TEXT NOT NULL,
+            rationale TEXT NOT NULL DEFAULT '', created_at TEXT NOT NULL,
+            FOREIGN KEY(project_id) REFERENCES workspace_projects(id) ON DELETE SET NULL
+        );
+        CREATE TABLE IF NOT EXISTS workspace_settings (
+            key TEXT PRIMARY KEY, value TEXT NOT NULL, updated_at TEXT NOT NULL
+        );
+        CREATE INDEX IF NOT EXISTS idx_workspace_projects_status ON workspace_projects(status, updated_at DESC);
+        CREATE INDEX IF NOT EXISTS idx_workspace_tasks_project_status ON workspace_tasks(project_id, status, priority);
+        CREATE INDEX IF NOT EXISTS idx_workspace_tasks_due ON workspace_tasks(due_date);
+        CREATE INDEX IF NOT EXISTS idx_workspace_checkpoints_project_created ON workspace_checkpoints(project_id, created_at DESC);
+        CREATE INDEX IF NOT EXISTS idx_workspace_decisions_project_created ON workspace_decisions(project_id, created_at DESC);
+        """
+    )
+    now = now_iso()
+    defaults = {
+        "autonomy_mode": "hybrid",
+        "primary_responsibility": "productivity_and_project_execution",
+        "infrastructure_preference": "keep_existing",
+        "operating_charter": (
+            "Execution over unnecessary explanations. Evidence over assumptions. "
+            "Quality over quantity. Reuse existing infrastructure and minimise recurring costs. "
+            "Preserve approved decisions. Never claim completion without verification. "
+            "Resume from the last verified checkpoint. Ask before consequential actions."
+        ),
+    }
+    for key, value in defaults.items():
+        await db.execute(
+            "INSERT OR IGNORE INTO workspace_settings (key, value, updated_at) VALUES (?,?,?)",
+            (key, value, now),
+        )
+    await db.commit()
+
+
 async def workspace_db():
     db = await get_db()
     try:
-        await db.executescript(
-            """
-            CREATE TABLE IF NOT EXISTS workspace_projects (
-                id TEXT PRIMARY KEY,
-                name TEXT NOT NULL,
-                description TEXT NOT NULL DEFAULT '',
-                status TEXT NOT NULL DEFAULT 'active' CHECK(status IN ('active','paused','completed','archived')),
-                priority TEXT NOT NULL DEFAULT 'normal' CHECK(priority IN ('low','normal','high','urgent')),
-                repository_url TEXT,
-                production_url TEXT,
-                documentation_url TEXT,
-                created_at TEXT NOT NULL,
-                updated_at TEXT NOT NULL
-            );
-            CREATE TABLE IF NOT EXISTS workspace_tasks (
-                id TEXT PRIMARY KEY,
-                project_id TEXT,
-                title TEXT NOT NULL,
-                description TEXT NOT NULL DEFAULT '',
-                status TEXT NOT NULL DEFAULT 'todo' CHECK(status IN ('todo','in_progress','blocked','done','cancelled')),
-                priority TEXT NOT NULL DEFAULT 'normal' CHECK(priority IN ('low','normal','high','urgent')),
-                due_date TEXT,
-                assigned_agent_id TEXT,
-                created_at TEXT NOT NULL,
-                updated_at TEXT NOT NULL,
-                completed_at TEXT,
-                FOREIGN KEY(project_id) REFERENCES workspace_projects(id) ON DELETE SET NULL,
-                FOREIGN KEY(assigned_agent_id) REFERENCES agents(id) ON DELETE SET NULL
-            );
-            CREATE TABLE IF NOT EXISTS workspace_checkpoints (
-                id TEXT PRIMARY KEY,
-                project_id TEXT,
-                task_id TEXT,
-                summary TEXT NOT NULL,
-                completed_work TEXT NOT NULL DEFAULT '',
-                next_action TEXT NOT NULL DEFAULT '',
-                blockers TEXT NOT NULL DEFAULT '',
-                evidence_urls TEXT NOT NULL DEFAULT '[]',
-                created_at TEXT NOT NULL,
-                FOREIGN KEY(project_id) REFERENCES workspace_projects(id) ON DELETE SET NULL,
-                FOREIGN KEY(task_id) REFERENCES workspace_tasks(id) ON DELETE SET NULL
-            );
-            CREATE TABLE IF NOT EXISTS workspace_decisions (
-                id TEXT PRIMARY KEY,
-                project_id TEXT,
-                title TEXT NOT NULL,
-                decision TEXT NOT NULL,
-                rationale TEXT NOT NULL DEFAULT '',
-                created_at TEXT NOT NULL,
-                FOREIGN KEY(project_id) REFERENCES workspace_projects(id) ON DELETE SET NULL
-            );
-            CREATE TABLE IF NOT EXISTS workspace_settings (
-                key TEXT PRIMARY KEY,
-                value TEXT NOT NULL,
-                updated_at TEXT NOT NULL
-            );
-            CREATE INDEX IF NOT EXISTS idx_workspace_projects_status ON workspace_projects(status, updated_at DESC);
-            CREATE INDEX IF NOT EXISTS idx_workspace_tasks_project_status ON workspace_tasks(project_id, status, priority);
-            CREATE INDEX IF NOT EXISTS idx_workspace_tasks_due ON workspace_tasks(due_date);
-            CREATE INDEX IF NOT EXISTS idx_workspace_checkpoints_project_created ON workspace_checkpoints(project_id, created_at DESC);
-            CREATE INDEX IF NOT EXISTS idx_workspace_decisions_project_created ON workspace_decisions(project_id, created_at DESC);
-            """
-        )
-        now = now_iso()
-        defaults = {
-            "autonomy_mode": "hybrid",
-            "primary_responsibility": "productivity_and_project_execution",
-            "infrastructure_preference": "keep_existing",
-            "operating_charter": (
-                "Execution over unnecessary explanations. Evidence over assumptions. "
-                "Quality over quantity. Reuse existing infrastructure and minimise recurring costs. "
-                "Preserve approved decisions. Never claim completion without verification. "
-                "Resume from the last verified checkpoint. Ask before consequential actions."
-            ),
-        }
-        for key, value in defaults.items():
-            await db.execute(
-                "INSERT OR IGNORE INTO workspace_settings (key, value, updated_at) VALUES (?,?,?)",
-                (key, value, now),
-            )
-        await db.commit()
+        await ensure_workspace_tables(db)
         yield db
     finally:
         await db.close()
-
-
 class ProjectCreate(BaseModel):
     name: str = Field(..., min_length=2, max_length=120)
     description: str = Field(default="", max_length=4000)
