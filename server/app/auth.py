@@ -5,7 +5,8 @@ import hashlib
 import hmac
 import time
 
-from fastapi import APIRouter, HTTPException, Request, Response
+from fastapi import APIRouter, Depends, Header, HTTPException, Request, Response
+from typing import Optional
 from pydantic import BaseModel, Field
 
 from app.core_helpers import (
@@ -13,7 +14,10 @@ from app.core_helpers import (
     SESSION_SECRET,
     SESSION_TTL_SECONDS,
     create_session_token,
+    decode_session_payload,
     get_db,
+    now_iso,
+    require_auth,
 )
 
 router = APIRouter(prefix="/api/v1/auth", tags=["authentication"])
@@ -93,3 +97,24 @@ async def login(body: LoginRequest, request: Request, response: Response):
         "token_type": "Bearer",
         "expires_in": SESSION_TTL_SECONDS,
     }
+
+
+
+@router.post("/logout")
+async def logout(authorization: Optional[str] = Header(None), _auth=Depends(require_auth)):
+    token = authorization[7:].strip()
+    payload = decode_session_payload(token)
+    if not payload:
+        raise HTTPException(401, "Session is invalid or expired")
+    token_hash = hashlib.sha256(token.encode("utf-8")).hexdigest()
+    db = await get_db()
+    try:
+        await db.execute(
+            "INSERT OR IGNORE INTO revoked_sessions (token_hash, expires_at, revoked_at) VALUES (?,?,?)",
+            (token_hash, int(payload["exp"]), now_iso()),
+        )
+        await db.execute("DELETE FROM revoked_sessions WHERE expires_at < ?", (int(time.time()),))
+        await db.commit()
+    finally:
+        await db.close()
+    return {"ok": True}
