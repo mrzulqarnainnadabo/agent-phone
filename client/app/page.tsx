@@ -87,6 +87,12 @@ export default function Home() {
     } catch (e) { console.error(e); }
   }
 
+  async function signOut() {
+    try { await api("/api/v1/auth/logout", { method: "POST" }); }
+    catch (error) { console.error(error); }
+    finally { clearSessionToken(); setAuthenticated(false); }
+  }
+
   function startNewChat() {
     setThreadId(null);
     setMessages([{ id: "welcome", role: "assistant", content: "Welcome back. What should we work on?" }]);
@@ -136,7 +142,7 @@ export default function Home() {
                 <h1 className="text-lg font-semibold">Agent Phone</h1>
                 <p className="text-xs text-gray-400">Personal operations</p>
               </div>
-              <div className="flex items-center gap-2"><button onClick={startNewChat} className="rounded-full border border-gray-700 px-3 py-1.5 text-xs text-gray-300">New chat</button><button onClick={() => { clearSessionToken(); setAuthenticated(false); }} className="rounded-full border border-gray-800 px-3 py-1.5 text-xs text-gray-500">Sign out</button></div>
+              <div className="flex items-center gap-2"><button onClick={startNewChat} className="rounded-full border border-gray-700 px-3 py-1.5 text-xs text-gray-300">New chat</button><button onClick={signOut} className="rounded-full border border-gray-800 px-3 py-1.5 text-xs text-gray-500">Sign out</button></div>
             </header>
             <div className="flex-1 px-3 py-4 space-y-3 overflow-y-auto">
               {messages.map((msg) => (
