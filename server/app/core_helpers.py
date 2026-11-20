@@ -1,7 +1,7 @@
 """Shared DB, auth, models, and model client for Agent Phone core."""
 from __future__ import annotations
 
-from typing import Optional, List
+from typing import Optional, List, Literal
 from fastapi import HTTPException, Depends, Header, Query
 from pydantic import BaseModel, Field
 import os, uuid, json, aiosqlite, httpx, hmac, hashlib, base64, time, binascii
