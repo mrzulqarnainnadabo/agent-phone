@@ -14,6 +14,8 @@ Required backend environment variables:
 - `MODEL_API_KEY`: optional for non-AI workspace features; required for real model replies.
 - `MODEL_API_BASE_URL`: defaults to `https://api.openai.com/v1`.
 - `DEFAULT_MODEL`: defaults to `gpt-4o-mini`.
+- `APP_ENV=production`.
+- `CORS_ORIGINS`: exact trusted frontend origin(s), for example `https://agent-phone.netlify.app`; production startup fails if this is empty.
 - `DATA_DIR`: persistent SQLite directory.
 - `GITHUB_TOKEN`: optional fine-grained GitHub token with read-only repository metadata, contents, pull requests, and Actions permissions.
 - `GITHUB_ALLOWED_REPOS`: comma-separated exact `owner/repository` allowlist. Leave empty to disable GitHub inspection.
