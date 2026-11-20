@@ -27,6 +27,8 @@ Optional AI variables:
 MODEL_API_KEY=<provider API key>
 MODEL_API_BASE_URL=https://api.openai.com/v1
 DEFAULT_MODEL=gpt-4o-mini
+MODEL_MAX_TOKENS=1024
+MODEL_DAILY_CALL_LIMIT=60
 
 # Optional read-only GitHub inspection. Restrict token scopes and repository access.
 GITHUB_TOKEN=<fine-grained-token-with-read-only-scopes>
