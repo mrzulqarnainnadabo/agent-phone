@@ -73,7 +73,7 @@ def test_authentication_fails_closed_when_token_is_unconfigured(client, monkeypa
     monkeypatch.setattr(core_helpers, "APP_AUTH_TOKEN", "")
     response = client.get("/api/v1/agents", headers=auth())
     assert response.status_code == 503
-    assert response.json()["detail"] == "Authentication is not configured"
+    assert response.json()["detail"] == "Authentication is not configured with a production-safe token"
 
 
 def test_chat_reports_missing_model_configuration_as_service_unavailable(client):
