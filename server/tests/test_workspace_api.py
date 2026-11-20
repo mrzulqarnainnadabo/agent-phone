@@ -209,5 +209,3 @@ def test_chat_can_call_bounded_read_only_github_tools(client, monkeypatch):
     assert response.status_code == 200
     assert "read-only GitHub access" in response.json()["reply"]
     assert calls["count"] == 2
-
-    db = core_helpers.get_db
