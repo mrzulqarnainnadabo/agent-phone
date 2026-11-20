@@ -143,6 +143,35 @@ These are to be addressed in the order above; do not paper over them with UI-onl
 
 ## 8. Current execution checkpoint
 
-**Status:** Baseline inspected; implementation branch created.  
-**Next action:** Establish CI-only verification and add regression coverage before modifying core execution behaviour.  
-**Not done:** No production deployment, no merge to main, no new paid service, no production credential changes.
+**Branch:** `feat/personal-ops-foundation`  
+**Baseline main SHA:** `4a5a1b110e1477de1b4f6955a85c8f0450328809`
+
+### Implemented on the branch
+- CI-only GitHub Actions workflow for backend tests and frontend production builds; no deployment steps.
+- Core API regression tests and workspace persistence tests.
+- Authentication fails closed when the server token is missing; comparisons use constant-time comparison.
+- Approval decisions now reject unknown approvals (404), repeat decisions (409), and use a conditional pending-state update.
+- New SQLite-backed workspace API: projects, tasks, checkpoints, decisions, settings, and overview.
+- Mobile Work tab for project/task capture, task status changes, operating preferences, and resumable checkpoints.
+- Chat system prompt now uses server-controlled operating charter, current projects, active tasks, and recent checkpoints.
+- Chat model selection is server-controlled; chat history is bounded to the most recent 20 messages.
+- Missing model configuration and provider failures return structured HTTP errors rather than placeholder replies.
+- Frontend Dockerfile no longer assumes Next.js standalone output.
+
+### Verification
+- Initial CI baseline passed both backend tests and frontend production build.
+- Workspace API test run passed backend tests and frontend production build before the latest chat-context changes.
+- Latest backend/frontend verification is running against the newest changes; see GitHub Actions for the exact commit and conclusion.
+- No local shell execution was available through the GitHub repository connector; CI is the source of build/test verification.
+
+### Remaining blockers before tool execution
+1. Replace the browser-exposed shared bearer token with a secure single-user session. Do not connect privileged tools before this is complete.
+2. Bind approvals to immutable action payloads, add expiry and audit semantics, and prevent replay.
+3. Add typed tool registry, per-tool permissions, and a server-side executor.
+4. Add provider usage/cost accounting and request budgets.
+5. Add GitHub read-only tool integration and test it without granting write scopes.
+6. Complete frontend and deployment configuration review.
+
+**Next action:** Verify the latest CI run; then finish Stage 1 acceptance (including settings/checkpoint UX and docs) and begin the secure session/authentication design.
+
+**Not done:** No production deployment, no merge to main, no paid service, no new production credentials, no external write integration.
