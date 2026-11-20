@@ -14,6 +14,8 @@ Required backend environment variables:
 - `MODEL_API_KEY`: optional for non-AI workspace features; required for real model replies.
 - `MODEL_API_BASE_URL`: defaults to `https://api.openai.com/v1`.
 - `DEFAULT_MODEL`: defaults to `gpt-4o-mini`.
+- `MODEL_MAX_TOKENS`: defaults to 1,024 output tokens per model call.
+- `MODEL_DAILY_CALL_LIMIT`: defaults to 60 model calls per UTC day, including tool-call rounds.
 - `APP_ENV=production`.
 - `CORS_ORIGINS`: exact trusted frontend origin(s), for example `https://agent-phone.netlify.app`; production startup fails if this is empty.
 - `DATA_DIR`: persistent SQLite directory.
