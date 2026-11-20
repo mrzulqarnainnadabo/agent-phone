@@ -41,7 +41,8 @@ Built to sell to individuals and organizations — without Vercel/Supabase lock-
 - [ ] Add real write-tool execution only after end-to-end approval and security review
 - [ ] Typed tool registry and real tool execution after approval
 - [ ] Verified engineering workflows: repository changes, branch/PR creation and test execution after write-action approval gates
-- [ ] Usage budgets, token accounting, and cost limits
+- [x] Daily model-call budget, output-token ceiling, bounded history, and bounded tool-result context
+- [ ] Provider token accounting and actual currency-cost reporting
 - [ ] Daily briefing, reminders, and weekly review
 - [ ] Voice, calendar/email connectors, multi-user support
 
