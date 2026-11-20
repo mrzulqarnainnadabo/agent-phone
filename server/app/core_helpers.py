@@ -13,12 +13,12 @@ DB_PATH = DATA_DIR / "agent_phone.db"
 MODEL_API_KEY = os.getenv("MODEL_API_KEY", "")
 MODEL_API_BASE_URL = os.getenv("MODEL_API_BASE_URL", "https://api.openai.com/v1").rstrip("/")
 DEFAULT_MODEL = os.getenv("DEFAULT_MODEL", "gpt-4o-mini")
-APP_AUTH_TOKEN = os.getenv("APP_AUTH_TOKEN", "dev-token-change-me")
+APP_AUTH_TOKEN = os.getenv("APP_AUTH_TOKEN", "")
 MAX_GOAL_AGENTS = 3
 
 async def require_auth(authorization: Optional[str] = Header(None)):
-    if not APP_AUTH_TOKEN:
-        raise HTTPException(503, "Authentication is not configured")
+    if not APP_AUTH_TOKEN or APP_AUTH_TOKEN in {"dev-token-change-me", "change-me-to-a-long-random-string"}:
+        raise HTTPException(503, "Authentication is not configured with a production-safe token")
     if not authorization or not authorization.startswith("Bearer "):
         raise HTTPException(401, "Missing or invalid Authorization header")
     supplied = authorization[7:].strip()
