@@ -122,6 +122,12 @@ def test_owner_login_issues_a_valid_short_lived_session(client):
     )
     assert response.status_code == 200
 
+    session_headers = {"Authorization": f"Bearer {payload['access_token']}"}
+    signed_out = client.post("/api/v1/auth/logout", headers=session_headers)
+    assert signed_out.status_code == 200
+    reused = client.get("/api/v1/agents", headers=session_headers)
+    assert reused.status_code == 401
+
 
 def test_invalid_session_token_is_rejected(client):
     response = client.get("/api/v1/agents", headers={"Authorization": "Bearer not.a.valid.signature"})
