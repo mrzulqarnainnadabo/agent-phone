@@ -200,7 +200,16 @@ class ApprovalPolicyUpdate(BaseModel):
 class ApprovalDecision(BaseModel):
     note: Optional[str]=None
 class ApprovalCreate(BaseModel):
-    agent_id: str; title: str; description: str; action_type: str="messaging.draft"; action_level: str="consequential"; proposed_output: Optional[str]=None; proposed_input: Optional[str]=None; reason: Optional[str]=None; goal_id: Optional[str]=None
+    agent_id: str
+    title: str = Field(..., min_length=2, max_length=200)
+    description: str = Field(..., min_length=2, max_length=4000)
+    action_type: str = Field(default="messaging.draft", min_length=2, max_length=100)
+    action_level: Literal["read", "draft", "consequential"] = "consequential"
+    proposed_output: Optional[str] = Field(default=None, max_length=12000)
+    proposed_input: Optional[str] = Field(default=None, max_length=8000)
+    reason: Optional[str] = Field(default=None, max_length=2000)
+    goal_id: Optional[str] = None
+    action_payload: Optional[dict] = None
 class GoalCreate(BaseModel):
     title: str; description: Optional[str]=""
 class GoalUpdate(BaseModel):
