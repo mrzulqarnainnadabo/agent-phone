@@ -11,7 +11,8 @@ from app.core_routes_more import register_core_more
 @pytest.fixture()
 def client(tmp_path, monkeypatch):
     monkeypatch.setattr(core_helpers, "DB_PATH", tmp_path / "agent-phone-test.sqlite3")
-    monkeypatch.setattr(core_helpers, "APP_AUTH_TOKEN", "test-token")
+    monkeypatch.setattr(core_helpers, "APP_LOGIN_PASSWORD", "test-owner-password")
+    monkeypatch.setattr(core_helpers, "SESSION_SECRET", "test-session-secret-at-least-32-characters")
     app = FastAPI()
     register_core(app)
     register_core_more(app)
@@ -20,7 +21,7 @@ def client(tmp_path, monkeypatch):
 
 
 def auth():
-    return {"Authorization": "Bearer test-token"}
+    return {"Authorization": f"Bearer {core_helpers.create_session_token()}"}
 
 
 def test_protected_agent_route_requires_auth(client):
@@ -70,10 +71,10 @@ def test_approval_decision_is_single_use(client):
 
 
 def test_authentication_fails_closed_when_token_is_unconfigured(client, monkeypatch):
-    monkeypatch.setattr(core_helpers, "APP_AUTH_TOKEN", "")
-    response = client.get("/api/v1/agents", headers=auth())
+    monkeypatch.setattr(core_helpers, "SESSION_SECRET", "")
+    response = client.get("/api/v1/agents", headers={"Authorization": "Bearer invalid"})
     assert response.status_code == 503
-    assert response.json()["detail"] == "Authentication is not configured with a production-safe token"
+    assert response.json()["detail"] == "Session authentication is not configured securely"
 
 
 def test_chat_reports_missing_model_configuration_as_service_unavailable(client):
@@ -93,8 +94,30 @@ def test_chat_rejects_empty_and_oversized_messages(client):
     assert oversized.status_code == 422
 
 
-@pytest.mark.parametrize("placeholder", ["dev-token-change-me", "change-me-to-a-long-random-string"])
-def test_auth_rejects_known_placeholder_tokens(client, monkeypatch, placeholder):
-    monkeypatch.setattr(core_helpers, "APP_AUTH_TOKEN", placeholder)
-    response = client.get("/api/v1/agents", headers={"Authorization": f"Bearer {placeholder}"})
+@pytest.mark.parametrize("placeholder", ["change-me", "change-me-to-a-long-random-string"])
+def test_auth_rejects_known_placeholder_session_secrets(client, monkeypatch, placeholder):
+    monkeypatch.setattr(core_helpers, "SESSION_SECRET", placeholder)
+    response = client.get("/api/v1/agents", headers={"Authorization": "Bearer invalid"})
     assert response.status_code == 503
+
+
+def test_owner_login_issues_a_valid_short_lived_session(client):
+    denied = client.post("/api/v1/auth/login", json={"password": "wrong-password"})
+    assert denied.status_code == 401
+
+    accepted = client.post("/api/v1/auth/login", json={"password": "test-owner-password"})
+    assert accepted.status_code == 200
+    payload = accepted.json()
+    assert payload["token_type"] == "Bearer"
+    assert payload["expires_in"] > 0
+
+    response = client.get(
+        "/api/v1/agents",
+        headers={"Authorization": f"Bearer {payload['access_token']}"},
+    )
+    assert response.status_code == 200
+
+
+def test_invalid_session_token_is_rejected(client):
+    response = client.get("/api/v1/agents", headers={"Authorization": "Bearer not.a.valid.signature"})
+    assert response.status_code == 401
