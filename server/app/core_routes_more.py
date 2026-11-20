@@ -217,6 +217,9 @@ def register_core_more(app: FastAPI) -> None:
                         "tool_calls": tool_calls,
                     })
                     for tool_call in tool_calls:
+                        arguments = {}
+                        if not isinstance(tool_call, dict):
+                            tool_call = {}
                         call_id = tool_call.get("id", f"tool-{uuid.uuid4().hex[:8]}")
                         function = tool_call.get("function") or {}
                         tool_name = function.get("name", "")
@@ -240,7 +243,7 @@ def register_core_more(app: FastAPI) -> None:
                         await db.execute(
                             "INSERT INTO tool_audit (id,thread_id,tool_name,arguments_json,outcome,created_at) VALUES (?,?,?,?,?,?)",
                             (f"aud-{uuid.uuid4().hex[:10]}", thread_id, str(tool_name)[:100],
-                             json.dumps(arguments if 'arguments' in locals() else {}, ensure_ascii=False)[:4000],
+                             json.dumps(arguments, ensure_ascii=False)[:4000],
                              "success" if result is not None and "error" not in result else "rejected", now_iso()),
                         )
                         messages.append({
