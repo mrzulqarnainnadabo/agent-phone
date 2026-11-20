@@ -2,11 +2,12 @@
 
 import { useState, useEffect, useRef } from "react";
 import MarketsPanel from "./MarketsPanel";
+import WorkspacePanel from "./WorkspacePanel";
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
 const AUTH_TOKEN = process.env.NEXT_PUBLIC_APP_AUTH_TOKEN || "dev-token-change-me";
 
-type Tab = "home" | "agents" | "goals" | "approvals" | "markets";
+type Tab = "home" | "workspace" | "agents" | "goals" | "approvals" | "markets";
 type Agent = { id: string; name: string; handle: string; purpose: string; personality?: string; status: string; approval_mode: string };
 type Approval = { id: string; agent_id: string; title: string; description: string; proposed_output?: string; status: string; created_at: string };
 type Goal = { id: string; title: string; description?: string; status: string; created_at: string; updated_at: string; agents?: GoalAgent[] };
@@ -163,12 +164,13 @@ export default function Home() {
             ))}
           </div>
         )}
+        {tab === "workspace" && <WorkspacePanel />}
         {tab === "markets" && <MarketsPanel />}
       </main>
       <nav className="border-t border-gray-800 bg-gray-950 px-2 py-2 flex justify-around">
-        {([{ id: "home", label: "Home" }, { id: "agents", label: "Agents" }, { id: "goals", label: "Goals" }, { id: "approvals", label: "Approvals" }, { id: "markets", label: "Markets" }] as const).map((t) => (
+        {([{ id: "home", label: "Home" }, { id: "workspace", label: "Work" }, { id: "agents", label: "Agents" }, { id: "goals", label: "Goals" }, { id: "approvals", label: "Approvals" }, { id: "markets", label: "Markets" }] as const).map((t) => (
           <button key={t.id} onClick={() => setTab(t.id)} className={`relative flex flex-col items-center px-2 py-1.5 rounded-xl text-xs font-medium ${tab === t.id ? "text-sky-500" : "text-gray-500"}`}>
-            <span className="text-lg leading-none mb-0.5">{t.id === "home" ? "⌂" : t.id === "agents" ? "◎" : t.id === "goals" ? "◇" : t.id === "approvals" ? "✓" : "◈"}</span>
+            <span className="text-lg leading-none mb-0.5">{t.id === "home" ? "⌂" : t.id === "workspace" ? "▤" : t.id === "agents" ? "◎" : t.id === "goals" ? "◇" : t.id === "approvals" ? "✓" : "◈"}</span>
             {t.label}
             {t.id === "approvals" && pendingCount > 0 && (
               <span className="absolute -top-0.5 right-0 bg-red-500 text-white text-[10px] w-4 h-4 rounded-full flex items-center justify-center">{pendingCount}</span>
