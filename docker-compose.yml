@@ -9,7 +9,9 @@ services:
       - MODEL_API_KEY=${MODEL_API_KEY:-}
       - MODEL_API_BASE_URL=${MODEL_API_BASE_URL:-https://api.openai.com/v1}
       - DEFAULT_MODEL=${DEFAULT_MODEL:-gpt-4o-mini}
-      - APP_AUTH_TOKEN=${APP_AUTH_TOKEN:-dev-token-change-me}
+      - APP_LOGIN_PASSWORD=${APP_LOGIN_PASSWORD:-}
+      - SESSION_SECRET=${SESSION_SECRET:-}
+      - SESSION_TTL_SECONDS=${SESSION_TTL_SECONDS:-28800}
       - DATA_DIR=/data
       - HOST=0.0.0.0
       - PORT=8000
@@ -29,7 +31,6 @@ services:
       dockerfile: Dockerfile
       args:
         NEXT_PUBLIC_API_URL: ${NEXT_PUBLIC_API_URL:-http://localhost:8000}
-        NEXT_PUBLIC_APP_AUTH_TOKEN: ${APP_AUTH_TOKEN:-dev-token-change-me}
     ports:
       - "3000:3000"
     environment:
