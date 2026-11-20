@@ -120,6 +120,15 @@ async def execute_readonly_tool(name: str, arguments: dict):
     owner, repo = arguments.get("owner"), arguments.get("repo")
     if not isinstance(owner, str) or not isinstance(repo, str):
         raise HTTPException(400, "GitHub tool requires owner and repo")
+    allowed_fields = {
+        "github_get_repository": {"owner", "repo"},
+        "github_list_pull_requests": {"owner", "repo", "state", "limit"},
+        "github_list_workflow_runs": {"owner", "repo", "branch", "limit"},
+        "github_get_repository_tree": {"owner", "repo", "ref"},
+        "github_get_repository_file": {"owner", "repo", "path", "ref"},
+    }
+    if name not in allowed_fields or set(arguments) - allowed_fields[name]:
+        raise HTTPException(400, "Tool is not registered or contains unsupported arguments")
     if name == "github_get_repository":
         data = await _get(owner, repo, "")
         return {key: data.get(key) for key in (
@@ -129,7 +138,7 @@ async def execute_readonly_tool(name: str, arguments: dict):
     if name == "github_list_pull_requests":
         state = arguments.get("state", "open")
         limit = arguments.get("limit", 10)
-        if state not in {"open", "closed", "all"} or not isinstance(limit, int) or not 1 <= limit <= 20:
+        if state not in {"open", "closed", "all"} or type(limit) is not int or not 1 <= limit <= 20:
             raise HTTPException(400, "Invalid pull request tool arguments")
         data = await _get(owner, repo, "pulls", {"state": state, "per_page": limit, "sort": "updated", "direction": "desc"})
         return [{"number": item.get("number"), "title": item.get("title"), "state": item.get("state"),
@@ -139,7 +148,7 @@ async def execute_readonly_tool(name: str, arguments: dict):
     if name == "github_list_workflow_runs":
         limit = arguments.get("limit", 10)
         branch = arguments.get("branch")
-        if not isinstance(limit, int) or not 1 <= limit <= 20 or (branch is not None and not isinstance(branch, str)):
+        if type(limit) is not int or not 1 <= limit <= 20 or (branch is not None and (not isinstance(branch, str) or len(branch) > 120)):
             raise HTTPException(400, "Invalid workflow run tool arguments")
         params = {"per_page": limit}
         if branch:
@@ -151,7 +160,7 @@ async def execute_readonly_tool(name: str, arguments: dict):
                  "created_at": item.get("created_at")} for item in data.get("workflow_runs", [])]
     if name == "github_get_repository_tree":
         ref = arguments.get("ref", "main")
-        if not isinstance(ref, str) or not ref or ".." in ref:
+        if not isinstance(ref, str) or not ref or len(ref) > 120 or ".." in ref:
             raise HTTPException(400, "Invalid Git reference")
         data = await _get(owner, repo, f"git/trees/{quote(ref, safe='')}", {"recursive": "1"})
         return {"sha": data.get("sha"), "truncated": data.get("truncated", False),
@@ -159,7 +168,7 @@ async def execute_readonly_tool(name: str, arguments: dict):
                             for item in data.get("tree", [])[:1000]]}
     if name == "github_get_repository_file":
         path, ref = arguments.get("path"), arguments.get("ref", "main")
-        if not isinstance(path, str) or not path or path.startswith("/") or ".." in path.split("/"):
+        if not isinstance(path, str) or not path or len(path) > 500 or path.startswith("/") or ".." in path.split("/"):
             raise HTTPException(400, "Invalid repository file path")
         if not isinstance(ref, str) or not ref or ".." in ref:
             raise HTTPException(400, "Invalid Git reference")
